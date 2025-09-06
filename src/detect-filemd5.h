@@ -21,10 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_FILEMD5_H
-#define SURICATA_DETECT_FILEMD5_H
+#ifndef __DETECT_FILEMD5_H__
+#define __DETECT_FILEMD5_H__
 
 /* prototypes */
 void DetectFileMd5Register (void);
 
-#endif /* SURICATA_DETECT_FILEMD5_H */
+#endif /* __DETECT_FILEMD5_H__ */

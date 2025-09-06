@@ -37,7 +37,6 @@
 
 #include "detect-tcp-flags.h"
 #include "util-unittest.h"
-#include "util-unittest-helper.h"
 
 #include "util-debug.h"
 
@@ -82,7 +81,6 @@ void DetectFlagsRegister (void)
     sigmatch_table[DETECT_FLAGS].Match = DetectFlagsMatch;
     sigmatch_table[DETECT_FLAGS].Setup = DetectFlagsSetup;
     sigmatch_table[DETECT_FLAGS].Free  = DetectFlagsFree;
-    sigmatch_table[DETECT_FLAGS].flags = SIGMATCH_SUPPORT_FIREWALL;
 #ifdef UNITTESTS
     sigmatch_table[DETECT_FLAGS].RegisterTests = FlagsRegisterTests;
 #endif
@@ -152,14 +150,12 @@ static int DetectFlagsMatch (DetectEngineThreadCtx *det_ctx, Packet *p,
 {
     SCEnter();
 
-    DEBUG_VALIDATE_BUG_ON(PKT_IS_PSEUDOPKT(p));
-    if (!(PacketIsTCP(p))) {
+    if (!(PKT_IS_TCP(p)) || PKT_IS_PSEUDOPKT(p)) {
         SCReturnInt(0);
     }
 
     const DetectFlagsData *de = (const DetectFlagsData *)ctx;
-    const TCPHdr *tcph = PacketGetTCP(p);
-    const uint8_t flags = tcph->th_flags;
+    const uint8_t flags = p->tcph->th_flags;
 
     return FlagsMatch(flags, de->modifier, de->flags, de->ignored_flags);
 }
@@ -177,54 +173,51 @@ static DetectFlagsData *DetectFlagsParse (const char *rawstr)
 {
     SCEnter();
 
-    int found = 0, ignore = 0;
+    int ret = 0, found = 0, ignore = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
     char *ptr;
-    DetectFlagsData *de = NULL;
 
     char arg1[16] = "";
     char arg2[16] = "";
     char arg3[16] = "";
 
-    pcre2_match_data *match = NULL;
-    int ret = DetectParsePcreExec(&parse_regex, &match, rawstr, 0, 0);
+    ret = DetectParsePcreExec(&parse_regex, rawstr, 0, 0, ov, MAX_SUBSTRINGS);
     SCLogDebug("input '%s', pcre said %d", rawstr, ret);
     if (ret < 3) {
-        SCLogError("pcre match failed");
-        goto error;
+        SCLogError(SC_ERR_PCRE_MATCH, "pcre match failed");
+        SCReturnPtr(NULL, "DetectFlagsData");
     }
 
-    size_t pcre2len = sizeof(arg1);
-    int res = SC_Pcre2SubstringCopy(match, 1, (PCRE2_UCHAR8 *)arg1, &pcre2len);
+    res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 1, arg1, sizeof(arg1));
     if (res < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
-        goto error;
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+        SCReturnPtr(NULL, "DetectFlagsData");
     }
     if (ret >= 2) {
-        pcre2len = sizeof(arg2);
-        res = pcre2_substring_copy_bynumber(match, 2, (PCRE2_UCHAR8 *)arg2, &pcre2len);
+        res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 2, arg2, sizeof(arg2));
         if (res < 0) {
-            SCLogError("pcre2_substring_copy_bynumber failed");
-            goto error;
+            SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+            SCReturnPtr(NULL, "DetectFlagsData");
         }
     }
     if (ret >= 3) {
-        pcre2len = sizeof(arg3);
-        res = SC_Pcre2SubstringCopy(match, 3, (PCRE2_UCHAR8 *)arg3, &pcre2len);
+        res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 3, arg3, sizeof(arg3));
         if (res < 0) {
-            SCLogError("pcre2_substring_copy_bynumber failed");
-            goto error;
+            SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+            SCReturnPtr(NULL, "DetectFlagsData");
         }
     }
     SCLogDebug("args '%s', '%s', '%s'", arg1, arg2, arg3);
 
     if (strlen(arg2) == 0) {
         SCLogDebug("empty argument");
-        goto error;
+        SCReturnPtr(NULL, "DetectFlagsData");
     }
 
-    de = SCCalloc(1, sizeof(DetectFlagsData));
+    DetectFlagsData *de = SCMalloc(sizeof(DetectFlagsData));
     if (unlikely(de == NULL))
         goto error;
+    memset(de, 0, sizeof(DetectFlagsData));
     de->ignored_flags = 0xff;
 
     /** First parse args1 */
@@ -351,8 +344,8 @@ static DetectFlagsData *DetectFlagsParse (const char *rawstr)
 
                 case '!':
                     if (de->modifier != 0) {
-                        SCLogError("\"flags\" supports only"
-                                   " one modifier at a time");
+                        SCLogError(SC_ERR_FLAGS_MODIFIER, "\"flags\" supports only"
+                                " one modifier at a time");
                         goto error;
                     }
                     de->modifier = MODIFIER_NOT;
@@ -360,8 +353,8 @@ static DetectFlagsData *DetectFlagsParse (const char *rawstr)
                     break;
                 case '+':
                     if (de->modifier != 0) {
-                        SCLogError("\"flags\" supports only"
-                                   " one modifier at a time");
+                        SCLogError(SC_ERR_FLAGS_MODIFIER, "\"flags\" supports only"
+                                " one modifier at a time");
                         goto error;
                     }
                     de->modifier = MODIFIER_PLUS;
@@ -369,8 +362,8 @@ static DetectFlagsData *DetectFlagsParse (const char *rawstr)
                     break;
                 case '*':
                     if (de->modifier != 0) {
-                        SCLogError("\"flags\" supports only"
-                                   " one modifier at a time");
+                        SCLogError(SC_ERR_FLAGS_MODIFIER, "\"flags\" supports only"
+                                " one modifier at a time");
                         goto error;
                     }
                     de->modifier = MODIFIER_ANY;
@@ -454,16 +447,12 @@ static DetectFlagsData *DetectFlagsParse (const char *rawstr)
         }
     }
 
-    pcre2_match_data_free(match);
     SCLogDebug("found %"PRId32" ignore %"PRId32"", found, ignore);
     SCReturnPtr(de, "DetectFlagsData");
 
 error:
     if (de) {
         SCFree(de);
-    }
-    if (match) {
-        pcre2_match_data_free(match);
     }
     SCReturnPtr(NULL, "DetectFlagsData");
 }
@@ -483,22 +472,27 @@ error:
 static int DetectFlagsSetup (DetectEngineCtx *de_ctx, Signature *s, const char *rawstr)
 {
     DetectFlagsData *de = NULL;
+    SigMatch *sm = NULL;
 
     de = DetectFlagsParse(rawstr);
     if (de == NULL)
         goto error;
 
-    if (SCSigMatchAppendSMToList(
-                de_ctx, s, DETECT_FLAGS, (SigMatchCtx *)de, DETECT_SM_LIST_MATCH) == NULL) {
+    sm = SigMatchAlloc();
+    if (sm == NULL)
         goto error;
-    }
+
+    sm->type = DETECT_FLAGS;
+    sm->ctx = (SigMatchCtx *)de;
+
+    SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_MATCH);
     s->flags |= SIG_FLAG_REQUIRE_PACKET;
 
     return 0;
 
 error:
-    if (de)
-        SCFree(de);
+    if (de) SCFree(de);
+    if (sm) SCFree(sm);
     return -1;
 }
 
@@ -555,17 +549,15 @@ int DetectFlagsSignatureNeedsSynOnlyPackets(const Signature *s)
 static void
 PrefilterPacketFlagsMatch(DetectEngineThreadCtx *det_ctx, Packet *p, const void *pectx)
 {
-    DEBUG_VALIDATE_BUG_ON(PKT_IS_PSEUDOPKT(p));
-    if (!(PacketIsTCP(p))) {
+    if (!(PKT_IS_TCP(p)) || PKT_IS_PSEUDOPKT(p)) {
         SCReturn;
     }
 
     const PrefilterPacketHeaderCtx *ctx = pectx;
-    if (!PrefilterPacketHeaderExtraMatch(ctx, p))
+    if (PrefilterPacketHeaderExtraMatch(ctx, p) == FALSE)
         return;
 
-    const TCPHdr *tcph = PacketGetTCP(p);
-    const uint8_t flags = tcph->th_flags;
+    const uint8_t flags = p->tcph->th_flags;
     if (FlagsMatch(flags, ctx->v1.u8[0], ctx->v1.u8[1], ctx->v1.u8[2]))
     {
         SCLogDebug("packet matches TCP flags %02x", ctx->v1.u8[1]);
@@ -590,14 +582,17 @@ PrefilterPacketFlagsCompare(PrefilterPacketHeaderValue v, void *smctx)
     if (v.u8[0] == a->modifier &&
         v.u8[1] == a->flags &&
         v.u8[2] == a->ignored_flags)
-        return true;
-    return false;
+        return TRUE;
+    return FALSE;
 }
 
 static int PrefilterSetupTcpFlags(DetectEngineCtx *de_ctx, SigGroupHead *sgh)
 {
-    return PrefilterSetupPacketHeader(de_ctx, sgh, DETECT_FLAGS, SIG_MASK_REQUIRE_REAL_PKT,
-            PrefilterPacketFlagsSet, PrefilterPacketFlagsCompare, PrefilterPacketFlagsMatch);
+    return PrefilterSetupPacketHeader(de_ctx, sgh, DETECT_FLAGS,
+            PrefilterPacketFlagsSet,
+            PrefilterPacketFlagsCompare,
+            PrefilterPacketFlagsMatch);
+
 }
 
 static bool PrefilterTcpFlagsIsPrefilterable(const Signature *s)
@@ -606,10 +601,10 @@ static bool PrefilterTcpFlagsIsPrefilterable(const Signature *s)
     for (sm = s->init_data->smlists[DETECT_SM_LIST_MATCH] ; sm != NULL; sm = sm->next) {
         switch (sm->type) {
             case DETECT_FLAGS:
-                return true;
+                return TRUE;
         }
     }
-    return false;
+    return FALSE;
 }
 
 /*
@@ -620,7 +615,7 @@ static bool PrefilterTcpFlagsIsPrefilterable(const Signature *s)
 /**
  * \test FlagsTestParse01 is a test for a  valid flags value
  *
- *  \retval 1 on success
+ *  \retval 1 on succces
  *  \retval 0 on failure
  */
 static int FlagsTestParse01 (void)
@@ -635,7 +630,7 @@ static int FlagsTestParse01 (void)
 /**
  * \test FlagsTestParse02 is a test for an invalid flags value
  *
- *  \retval 1 on success
+ *  \retval 1 on succces
  *  \retval 0 on failure
  */
 static int FlagsTestParse02 (void)
@@ -658,7 +653,7 @@ static int FlagsTestParse02 (void)
  */
 static int FlagsTestParse03 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -669,12 +664,13 @@ static int FlagsTestParse03 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_ACK | TH_PUSH | TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_ACK|TH_PUSH|TH_SYN|TH_RST;
 
     de = DetectFlagsParse("AP+");
 
@@ -707,12 +703,12 @@ error:
 /**
  * \test FlagsTestParse04 check if ACK bit is set. Must fails.
  *
- *  \retval 1 on success
+ *  \retval 1 on succces
  *  \retval 0 on failure
  */
 static int FlagsTestParse04 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -723,12 +719,13 @@ static int FlagsTestParse04 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_SYN;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_SYN;
 
     de = DetectFlagsParse("A");
 
@@ -767,7 +764,7 @@ error:
  */
 static int FlagsTestParse05 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -778,12 +775,13 @@ static int FlagsTestParse05 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_ACK | TH_PUSH | TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_ACK|TH_PUSH|TH_SYN|TH_RST;
 
     de = DetectFlagsParse("+AP,SR");
 
@@ -822,7 +820,7 @@ error:
  */
 static int FlagsTestParse06 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -833,12 +831,13 @@ static int FlagsTestParse06 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_ACK | TH_PUSH | TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_ACK|TH_PUSH|TH_SYN|TH_RST;
 
     de = DetectFlagsParse("+AP,UR");
 
@@ -876,7 +875,7 @@ error:
  */
 static int FlagsTestParse07 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -887,12 +886,13 @@ static int FlagsTestParse07 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_SYN|TH_RST;
 
     de = DetectFlagsParse("*AP");
 
@@ -931,7 +931,7 @@ error:
  */
 static int FlagsTestParse08 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -942,12 +942,13 @@ static int FlagsTestParse08 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_SYN|TH_RST;
 
     de = DetectFlagsParse("*SA");
 
@@ -985,7 +986,7 @@ error:
  */
 static int FlagsTestParse09 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -996,12 +997,13 @@ static int FlagsTestParse09 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_SYN|TH_RST;
 
     de = DetectFlagsParse("!PA");
 
@@ -1039,7 +1041,7 @@ error:
  */
 static int FlagsTestParse10 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -1050,12 +1052,13 @@ static int FlagsTestParse10 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_SYN|TH_RST;
 
     de = DetectFlagsParse("!AP");
 
@@ -1093,7 +1096,7 @@ error:
  */
 static int FlagsTestParse11 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -1104,12 +1107,13 @@ static int FlagsTestParse11 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_SYN | TH_RST | TH_URG;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_SYN|TH_RST|TH_URG;
 
     de = DetectFlagsParse("*AP,SR");
 
@@ -1143,12 +1147,12 @@ error:
 /**
  * \test FlagsTestParse12 check if no flags are set. Must fails.
  *
- *  \retval 1 on success
+ *  \retval 1 on succces
  *  \retval 0 on failure
  */
 static int FlagsTestParse12 (void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -1159,12 +1163,13 @@ static int FlagsTestParse12 (void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_SYN;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_SYN;
 
     de = DetectFlagsParse("0");
 
@@ -1200,7 +1205,7 @@ error:
 /**
  * \test test for a  valid flags value
  *
- *  \retval 1 on success
+ *  \retval 1 on succces
  *  \retval 0 on failure
  */
 static int FlagsTestParse13 (void)
@@ -1234,7 +1239,7 @@ static int FlagsTestParse14(void)
 
 static int FlagsTestParse15(void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -1245,12 +1250,13 @@ static int FlagsTestParse15(void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_ECN | TH_CWR | TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_ECN | TH_CWR | TH_SYN | TH_RST;
 
     de = DetectFlagsParse("EC+");
 
@@ -1286,7 +1292,7 @@ error:
 
 static int FlagsTestParse16(void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -1297,12 +1303,13 @@ static int FlagsTestParse16(void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_ECN | TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_ECN | TH_SYN | TH_RST;
 
     de = DetectFlagsParse("EC*");
 
@@ -1341,7 +1348,7 @@ error:
  */
 static int FlagsTestParse17(void)
 {
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -1352,12 +1359,13 @@ static int FlagsTestParse17(void)
     TCPHdr tcph;
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&ipv4h, 0, sizeof(IPV4Hdr));
     memset(&tcph, 0, sizeof(TCPHdr));
 
-    UTHSetIPV4Hdr(p, &ipv4h);
-    tcph.th_flags = TH_ECN | TH_SYN | TH_RST;
-    UTHSetTCPHdr(p, &tcph);
+    p->ip4h = &ipv4h;
+    p->tcph = &tcph;
+    p->tcph->th_flags = TH_ECN | TH_SYN | TH_RST;
 
     de = DetectFlagsParse("EC+");
 

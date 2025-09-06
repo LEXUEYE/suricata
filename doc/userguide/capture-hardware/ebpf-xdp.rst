@@ -80,14 +80,15 @@ Make sure you have ``clang`` (>=3.9) installed on the system  ::
 
  sudo apt install clang
 
+Some i386 headers will also be needed as eBPF is not x86_64 and some included headers
+are architecture specific ::
+
+ sudo apt install libc6-dev-i386 --no-install-recommends
+
 libbpf
 ~~~~~~
 
 Suricata uses libbpf to interact with eBPF and XDP ::
-
-  sudo apt install libbpf-dev
-
-If the libbpf package is unavailable, it can be cloned from the repository ::
 
  git clone https://github.com/libbpf/libbpf.git
 
@@ -108,7 +109,7 @@ Compile and install Suricata
 To get Suricata source, you can use the usual ::
 
  git clone https://github.com/OISF/suricata.git
- cd suricata && ./scripts/bundle.sh
+ cd suricata && git clone https://github.com/OISF/libhtp.git -b 0.5.x
 
  ./autogen.sh
 
@@ -188,6 +189,7 @@ Then setup the `ebpf-filter-file` variable in af-packet section in ``suricata.ya
     # eBPF file containing a 'filter' function that will be inserted into the
     # kernel and used as load balancing function
     ebpf-filter-file:  /usr/libexec/suricata/ebpf/vlan_filter.bpf
+    use-mmap: yes
     ring-size: 200000
 
 You can then run Suricata normally ::
@@ -208,6 +210,7 @@ update af-packet configuration in ``suricata.yaml`` to set bypass to `yes` ::
     # kernel and used as packet filter function
     ebpf-filter-file:  /usr/libexec/suricata/ebpf/bypass_filter.bpf
     bypass: yes
+    use-mmap: yes
     ring-size: 200000
 
 Constraints on eBPF code to have a bypass compliant code are stronger than for regular filters. The
@@ -244,6 +247,7 @@ and point the ``ebpf-lb-file`` variable to the ``lb.bpf`` file ::
     # eBPF file containing a 'loadbalancer' function that will be inserted into the
     # kernel and used as load balancing function
     ebpf-lb-file:  /usr/libexec/suricata/ebpf/lb.bpf
+    use-mmap: yes
     ring-size: 200000
 
 Setup XDP bypass
@@ -278,6 +282,7 @@ also use the ``/usr/libexec/suricata/ebpf/xdp_filter.bpf`` (in our example TCP o
     # if the ebpf filter implements a bypass function, you can set 'bypass' to
     # yes and benefit from these feature
     bypass: yes
+    use-mmap: yes
     ring-size: 200000
     # Uncomment the following if you are using hardware XDP with
     # a card like Netronome (default value is yes)
@@ -380,6 +385,7 @@ A sample configuration for pure XDP load balancing could look like ::
     xdp-mode: driver
     xdp-filter-file:  /usr/libexec/suricata/ebpf/xdp_lb.bpf
     xdp-cpu-redirect: ["1-17"] # or ["all"] to load balance on all CPUs
+    use-mmap: yes
     ring-size: 200000
 
 It is possible to use `xdp_monitor` to have information about the behavior of CPU redirect. This

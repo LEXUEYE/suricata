@@ -21,10 +21,10 @@
  * \author Jeff Lucovsky <jeff@lucovsky.org
  */
 
-#ifndef SURICATA_DETECT_TRANSFORM_PCREXFORM_H
-#define SURICATA_DETECT_TRANSFORM_PCREXFORM_H
+#ifndef __DETECT_TRANSFORM_PCREXFORM_H__
+#define __DETECT_TRANSFORM_PCREXFORM_H__
 
 /* prototypes */
 void DetectTransformPcrexformRegister (void);
 
-#endif /* SURICATA_DETECT_TRANSFORM_PCREXFORM_H */
+#endif /* __DETECT_TRANSFORM_PCREXFORM_H__ */

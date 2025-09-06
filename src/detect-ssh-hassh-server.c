@@ -23,14 +23,13 @@
 
 #include "suricata-common.h"
 #include "threads.h"
+#include "debug.h"
 #include "decode.h"
 
 #include "detect.h"
 #include "detect-parse.h"
-#include "detect-content.h"
 
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-state.h"
 #include "detect-engine-prefilter.h"
@@ -71,15 +70,15 @@ static InspectionBuffer *GetSshData(DetectEngineThreadCtx *det_ctx,
         const uint8_t *hasshServer = NULL;
         uint32_t b_len = 0;
 
-        if (SCSshTxGetHassh(txv, &hasshServer, &b_len, flow_flags) != 1)
+        if (rs_ssh_tx_get_hassh(txv, &hasshServer, &b_len, flow_flags) != 1)
             return NULL;
         if (hasshServer == NULL || b_len == 0) {
             SCLogDebug("SSH hassh not set");
             return NULL;
         }
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, hasshServer, b_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, hasshServer, b_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;
@@ -98,19 +97,19 @@ static InspectionBuffer *GetSshData(DetectEngineThreadCtx *det_ctx,
  */
 static int DetectSshHasshServerSetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
 {
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_ssh_hassh_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_ssh_hassh_buffer_id) < 0)
         return -1;
 
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_SSH) < 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_SSH) < 0)
         return -1;
             
     /* try to enable Hassh */
-    SCSshEnableHassh();
+    rs_ssh_enable_hassh();
 
     /* Check if Hassh is disabled */
-    if (!RunmodeIsUnittests() && !SCSshHasshIsEnabled()) {
-        if (!SigMatchSilentErrorEnabled(de_ctx, DETECT_SSH_HASSH_SERVER)) {
-            SCLogError("hassh support is not enabled");
+    if (!RunmodeIsUnittests() && !rs_ssh_hassh_is_enabled()) {
+        if (!SigMatchSilentErrorEnabled(de_ctx, DETECT_AL_SSH_HASSH_SERVER)) {
+            SCLogError(SC_WARN_HASSH_DISABLED, "hassh support is not enabled");
         }
         return -2;
     }
@@ -119,29 +118,70 @@ static int DetectSshHasshServerSetup(DetectEngineCtx *de_ctx, Signature *s, cons
 
 }
 
-static void DetectSshHasshServerHashSetupCallback(const DetectEngineCtx *de_ctx, Signature *s)
+
+static _Bool DetectSshHasshServerHashValidateCallback(const Signature *s,
+                                              const char **sigerror)
 {
-    for (uint32_t x = 0; x < s->init_data->buffer_index; x++) {
-        if (s->init_data->buffers[x].id != (uint32_t)g_ssh_hassh_buffer_id)
+    const SigMatch *sm = s->init_data->smlists[g_ssh_hassh_buffer_id];
+    for ( ; sm != NULL; sm = sm->next)
+    {
+        if (sm->type != DETECT_CONTENT)
             continue;
-        SigMatch *sm = s->init_data->buffers[x].head;
-        for (; sm != NULL; sm = sm->next) {
-            if (sm->type != DETECT_CONTENT)
-                continue;
 
-            DetectContentData *cd = (DetectContentData *)sm->ctx;
+        const DetectContentData *cd = (DetectContentData *)sm->ctx;
 
-            uint32_t u;
-            for (u = 0; u < cd->content_len; u++) {
-                if (isupper(cd->content[u])) {
-                    cd->content[u] = u8_tolower(cd->content[u]);
-                }
-            }
-
-            SpmDestroyCtx(cd->spm_ctx);
-            cd->spm_ctx =
-                    SpmInitCtx(cd->content, cd->content_len, 1, de_ctx->spm_global_thread_ctx);
+        if (cd->flags & DETECT_CONTENT_NOCASE) {
+            *sigerror = "ssh.hassh.server should not be used together with "
+                        "nocase, since the rule is automatically "
+                        "lowercased anyway which makes nocase redundant.";
+            SCLogWarning(SC_WARN_POOR_RULE, "rule %u: %s", s->id, *sigerror);
         }
+
+        if (cd->content_len != 32)
+        {
+            *sigerror = "Invalid length of the specified ssh.hassh.server (should "
+                        "be 32 characters long). This rule will therefore "
+                        "never match.";
+            SCLogWarning(SC_WARN_POOR_RULE,  "rule %u: %s", s->id, *sigerror);
+            return FALSE;
+        }
+        for (size_t i = 0; i < cd->content_len; ++i)
+        {
+            if(!isxdigit(cd->content[i])) 
+            {
+                *sigerror = "Invalid ssh.hassh.server string (should be string of hexademical characters)."
+                            "This rule will therefore never match.";
+                SCLogWarning(SC_WARN_POOR_RULE,  "rule %u: %s", s->id, *sigerror);
+                return FALSE;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
+static void DetectSshHasshServerHashSetupCallback(const DetectEngineCtx *de_ctx,
+                                          Signature *s)
+{
+    SigMatch *sm = s->init_data->smlists[g_ssh_hassh_buffer_id];
+    for ( ; sm != NULL; sm = sm->next)
+    {
+        if (sm->type != DETECT_CONTENT)
+            continue;
+
+        DetectContentData *cd = (DetectContentData *)sm->ctx;
+
+        uint32_t u;
+        for (u = 0; u < cd->content_len; u++)
+        {
+            if (isupper(cd->content[u])) {
+                cd->content[u] = tolower(cd->content[u]);
+            }
+        }
+
+        SpmDestroyCtx(cd->spm_ctx);
+        cd->spm_ctx = SpmInitCtx(cd->content, cd->content_len, 1,
+        		de_ctx->spm_global_thread_ctx);
     }
 }
 
@@ -150,21 +190,23 @@ static void DetectSshHasshServerHashSetupCallback(const DetectEngineCtx *de_ctx,
  */
 void DetectSshHasshServerRegister(void) 
 {
-    sigmatch_table[DETECT_SSH_HASSH_SERVER].name = KEYWORD_NAME;
-    sigmatch_table[DETECT_SSH_HASSH_SERVER].alias = KEYWORD_ALIAS;
-    sigmatch_table[DETECT_SSH_HASSH_SERVER].desc = BUFFER_NAME " sticky buffer";
-    sigmatch_table[DETECT_SSH_HASSH_SERVER].url = "/rules/" KEYWORD_DOC;
-    sigmatch_table[DETECT_SSH_HASSH_SERVER].Setup = DetectSshHasshServerSetup;
-    sigmatch_table[DETECT_SSH_HASSH_SERVER].flags |= SIGMATCH_INFO_STICKY_BUFFER | SIGMATCH_NOOPT;
+    sigmatch_table[DETECT_AL_SSH_HASSH_SERVER].name = KEYWORD_NAME;
+    sigmatch_table[DETECT_AL_SSH_HASSH_SERVER].alias = KEYWORD_ALIAS;
+    sigmatch_table[DETECT_AL_SSH_HASSH_SERVER].desc = BUFFER_NAME " sticky buffer";
+    sigmatch_table[DETECT_AL_SSH_HASSH_SERVER].url = "/rules/" KEYWORD_DOC;
+    sigmatch_table[DETECT_AL_SSH_HASSH_SERVER].Setup = DetectSshHasshServerSetup;
+    sigmatch_table[DETECT_AL_SSH_HASSH_SERVER].flags |= SIGMATCH_INFO_STICKY_BUFFER | SIGMATCH_NOOPT;
 
-    DetectAppLayerMpmRegister(BUFFER_NAME, SIG_FLAG_TOCLIENT, 2, PrefilterGenericMpmRegister,
-            GetSshData, ALPROTO_SSH, SshStateBannerDone);
-    DetectAppLayerInspectEngineRegister(BUFFER_NAME, ALPROTO_SSH, SIG_FLAG_TOCLIENT,
-            SshStateBannerDone, DetectEngineInspectBufferGeneric, GetSshData);
+    DetectAppLayerMpmRegister2(BUFFER_NAME, SIG_FLAG_TOCLIENT, 2, 
+            PrefilterGenericMpmRegister, GetSshData, 
+            ALPROTO_SSH, SshStateBannerDone);
+    DetectAppLayerInspectEngineRegister2(BUFFER_NAME, ALPROTO_SSH, 
+            SIG_FLAG_TOCLIENT, SshStateBannerDone, 
+            DetectEngineInspectBufferGeneric, GetSshData);
     DetectBufferTypeSetDescriptionByName(BUFFER_NAME, BUFFER_DESC);
 
     g_ssh_hassh_buffer_id = DetectBufferTypeGetByName(BUFFER_NAME);
 
     DetectBufferTypeRegisterSetupCallback(BUFFER_NAME, DetectSshHasshServerHashSetupCallback);
-    DetectBufferTypeRegisterValidateCallback(BUFFER_NAME, DetectMd5ValidateCallback);
+    DetectBufferTypeRegisterValidateCallback(BUFFER_NAME, DetectSshHasshServerHashValidateCallback);
 }

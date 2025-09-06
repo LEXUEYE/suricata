@@ -21,14 +21,14 @@
  * \author Ondrej Slanina <oslanina@kerio.com>
  */
 
-#ifndef SURICATA_WIN32_SERVICE_H
-#define SURICATA_WIN32_SERVICE_H
+#ifndef __WIN32_SERVICE_H__
+#define __WIN32_SERVICE_H__
 
 #ifdef OS_WIN32
 int SCRunningAsService(void);
 int SCServiceInit(int argc, char **argv);
 int SCServiceInstall(int argc, char **argv);
-int SCServiceRemove(void);
+int SCServiceRemove(int argc, char **argv);
 int SCServiceChangeParams(int argc, char **argv);
 #endif /* OS_WIN32 */
 

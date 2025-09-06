@@ -11,12 +11,13 @@ packets take to be processed. It is a way to figure out why certain
 packets are being processed quicker than others, and this way a good
 tool for developing Suricata.
 
-Update Suricata by following the steps from :ref:`Installation from GIT`. Start
+Update Suricata by following the steps from `Installation from Git
+<https://redmine.openinfosecfoundation.org/projects/suricata/wiki/Installation_from_Git>`_. Start
 at the end at
 
 ::
 
-  cd suricata/suricata
+  cd suricata/oisf
   git pull
 
 And follow the described next steps. To enable packet profiling, make

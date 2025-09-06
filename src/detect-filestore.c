@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2021 Open Information Security Foundation
+/* Copyright (C) 2007-2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -25,6 +25,7 @@
 
 #include "suricata-common.h"
 #include "threads.h"
+#include "debug.h"
 #include "decode.h"
 
 #include "detect.h"
@@ -52,8 +53,6 @@
 #include "stream-tcp.h"
 
 #include "detect-filestore.h"
-
-#include "util-validate.h"
 
 /**
  * \brief Regex for parsing our flow options
@@ -118,8 +117,7 @@ static int FilestorePostMatchWithOptions(Packet *p, Flow *f, const DetectFilesto
     switch (filestore->direction) {
         case FILESTORE_DIR_DEFAULT:
             rule_dir = 1;
-            // will use both sides if scope is not default
-            // fallthrough
+            break;
         case FILESTORE_DIR_BOTH:
             toserver_dir = 1;
             toclient_dir = 1;
@@ -153,32 +151,30 @@ static int FilestorePostMatchWithOptions(Packet *p, Flow *f, const DetectFilesto
     if (this_file)  {
         FileStoreFileById(fc, file_id);
     } else if (this_tx) {
-        /* set in AppLayerTxData. Parsers and logger will propagate it to the
-         * individual files, both new and current. */
-        void *txv = AppLayerParserGetTx(f->proto, f->alproto, f->alstate, tx_id);
-        DEBUG_VALIDATE_BUG_ON(txv == NULL);
-        if (txv != NULL) {
-            AppLayerTxData *txd = AppLayerParserGetTxData(f->proto, f->alproto, txv);
-            if (toclient_dir) {
-                txd->file_flags |= FLOWFILE_STORE_TC;
+        /* flag tx all files will be stored */
+        if (f->alproto == ALPROTO_HTTP && f->alstate != NULL) {
+            HtpState *htp_state = f->alstate;
+            if (toserver_dir) {
+                htp_state->flags |= HTP_FLAG_STORE_FILES_TX_TS;
+                FileStoreAllFilesForTx(htp_state->files_ts, tx_id);
             }
-                if (toserver_dir) {
-                    txd->file_flags |= FLOWFILE_STORE_TS;
-                }
+            if (toclient_dir) {
+                htp_state->flags |= HTP_FLAG_STORE_FILES_TX_TC;
+                FileStoreAllFilesForTx(htp_state->files_tc, tx_id);
+            }
+            htp_state->store_tx_id = tx_id;
         }
     } else if (this_flow) {
-        /* set in flow and AppLayerStateData */
-        AppLayerStateData *sd = AppLayerParserGetStateData(f->proto, f->alproto, f->alstate);
-        if (toclient_dir) {
-            f->file_flags |= FLOWFILE_STORE_TC;
-            if (sd != NULL) {
-                sd->file_flags |= FLOWFILE_STORE_TC;
+        /* flag flow all files will be stored */
+        if (f->alproto == ALPROTO_HTTP && f->alstate != NULL) {
+            HtpState *htp_state = f->alstate;
+            if (toserver_dir) {
+                htp_state->flags |= HTP_FLAG_STORE_FILES_TS;
+                FileStoreAllFiles(htp_state->files_ts);
             }
-        }
-        if (toserver_dir) {
-            f->file_flags |= FLOWFILE_STORE_TS;
-            if (sd != NULL) {
-                sd->file_flags |= FLOWFILE_STORE_TS;
+            if (toclient_dir) {
+                htp_state->flags |= HTP_FLAG_STORE_FILES_TC;
+                FileStoreAllFiles(htp_state->files_tc);
             }
         }
     } else {
@@ -202,6 +198,8 @@ static int FilestorePostMatchWithOptions(Packet *p, Flow *f, const DetectFilesto
 static int DetectFilestorePostMatch(DetectEngineThreadCtx *det_ctx,
         Packet *p, const Signature *s, const SigMatchCtx *ctx)
 {
+    uint8_t flags = 0;
+
     SCEnter();
 
     if (det_ctx->filestore_cnt == 0) {
@@ -216,41 +214,37 @@ static int DetectFilestorePostMatch(DetectEngineThreadCtx *det_ctx,
 #endif
     }
 
-    if (p->flow->proto == IPPROTO_TCP && p->flow->protoctx != NULL) {
+    if (p->proto == IPPROTO_TCP && p->flow->protoctx != NULL) {
         /* set filestore depth for stream reassembling */
         TcpSession *ssn = (TcpSession *)p->flow->protoctx;
         TcpSessionSetReassemblyDepth(ssn, FileReassemblyDepth());
     }
+    if (p->flowflags & FLOW_PKT_TOCLIENT)
+        flags |= STREAM_TOCLIENT;
+    else
+        flags |= STREAM_TOSERVER;
 
-    SCLogDebug("s->filestore_ctx %p", s->filestore_ctx);
-
-    const uint8_t flags = STREAM_FLAGS_FOR_PACKET(p);
     for (uint16_t u = 0; u < det_ctx->filestore_cnt; u++) {
-        void *alstate = FlowGetAppState(p->flow);
-        AppLayerParserSetStreamDepthFlag(
-                p->flow->proto, p->flow->alproto, alstate, det_ctx->filestore[u].tx_id, flags);
+        AppLayerParserSetStreamDepthFlag(p->flow->proto, p->flow->alproto,
+                                         FlowGetAppState(p->flow),
+                                         det_ctx->filestore[u].tx_id,
+                                         flags);
+    }
 
-        void *txv = AppLayerParserGetTx(
-                p->flow->proto, p->flow->alproto, alstate, det_ctx->filestore[u].tx_id);
-        DEBUG_VALIDATE_BUG_ON(txv == NULL);
-        if (txv) {
-            AppLayerGetFileState files = AppLayerParserGetTxFiles(p->flow, txv, flags);
-            FileContainer *ffc_tx = files.fc;
-            DEBUG_VALIDATE_BUG_ON(ffc_tx == NULL);
-            if (ffc_tx) {
-                SCLogDebug("u %u txv %p ffc_tx %p file_id %u", u, txv, ffc_tx,
-                        det_ctx->filestore[u].file_id);
+    FileContainer *ffc = AppLayerParserGetFiles(p->flow, flags);
 
-                /* filestore for single files only */
-                if (s->filestore_ctx == NULL) {
-                    FileStoreFileById(ffc_tx, det_ctx->filestore[u].file_id);
-                } else {
-                    FilestorePostMatchWithOptions(p, p->flow, s->filestore_ctx, ffc_tx,
-                            det_ctx->filestore[u].file_id, det_ctx->filestore[u].tx_id);
-                }
-            }
+    /* filestore for single files only */
+    if (s->filestore_ctx == NULL) {
+        for (uint16_t u = 0; u < det_ctx->filestore_cnt; u++) {
+            FileStoreFileById(ffc, det_ctx->filestore[u].file_id);
+        }
+    } else {
+        for (uint16_t u = 0; u < det_ctx->filestore_cnt; u++) {
+            FilestorePostMatchWithOptions(p, p->flow, s->filestore_ctx, ffc,
+                    det_ctx->filestore[u].file_id, det_ctx->filestore[u].tx_id);
         }
     }
+
     SCReturnInt(0);
 }
 
@@ -278,13 +272,6 @@ static int DetectFilestoreMatch (DetectEngineThreadCtx *det_ctx, Flow *f,
 
     SCEnter();
 
-    if (!RunmodeIsUnittests()) {
-        extern bool g_filedata_logger_enabled;
-        if (!g_filedata_logger_enabled) {
-            SCLogDebug("not storing file match: no filedata logger enabled");
-            SCReturnInt(1);
-        }
-    }
     if (det_ctx->filestore_cnt >= DETECT_FILESTORE_MAX) {
         SCReturnInt(1);
     }
@@ -343,11 +330,6 @@ static int DetectFilestoreSetup (DetectEngineCtx *de_ctx, Signature *s, const ch
     static bool warn_not_configured = false;
     static uint32_t de_version = 0;
 
-    if (de_ctx->filestore_cnt == UINT16_MAX) {
-        SCLogError("Cannot have more than 65535 filestore signatures");
-        return -1;
-    }
-
     /* Check on first-time loads (includes following a reload) */
     if (!warn_not_configured || (de_ctx->version != de_version)) {
         if (de_version != de_ctx->version) {
@@ -355,7 +337,7 @@ static int DetectFilestoreSetup (DetectEngineCtx *de_ctx, Signature *s, const ch
                        de_ctx->version);
         }
         if (!RequiresFeature(FEATURE_OUTPUT_FILESTORE)) {
-            SCLogWarning("One or more rule(s) depends on the "
+            SCLogWarning(SC_WARN_ALERT_CONFIG, "One or more rule(s) depends on the "
                          "file-store output log which is not enabled. "
                          "Enable the output \"file-store\".");
         }
@@ -364,16 +346,23 @@ static int DetectFilestoreSetup (DetectEngineCtx *de_ctx, Signature *s, const ch
     }
 
     DetectFilestoreData *fd = NULL;
+    SigMatch *sm = NULL;
     char *args[3] = {NULL,NULL,NULL};
-    int res = 0;
-    size_t pcre2len;
-    pcre2_match_data *match = NULL;
+    int ret = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
 
     /* filestore and bypass keywords can't work together */
     if (s->flags & SIG_FLAG_BYPASS) {
-        SCLogError("filestore can't work with bypass keyword");
+        SCLogError(SC_ERR_CONFLICTING_RULE_KEYWORDS,
+                   "filestore can't work with bypass keyword");
         return -1;
     }
+
+    sm = SigMatchAlloc();
+    if (sm == NULL)
+        goto error;
+
+    sm->type = DETECT_FILESTORE;
 
     if (str != NULL && strlen(str) > 0) {
         char str_0[32];
@@ -381,44 +370,42 @@ static int DetectFilestoreSetup (DetectEngineCtx *de_ctx, Signature *s, const ch
         char str_2[32];
         SCLogDebug("str %s", str);
 
-        int ret = DetectParsePcreExec(&parse_regex, &match, str, 0, 0);
+        ret = DetectParsePcreExec(&parse_regex, str, 0, 0, ov, MAX_SUBSTRINGS);
         if (ret < 1 || ret > 4) {
-            SCLogError("parse error, ret %" PRId32 ", string %s", ret, str);
+            SCLogError(SC_ERR_PCRE_MATCH, "parse error, ret %" PRId32 ", string %s", ret, str);
             goto error;
         }
 
         if (ret > 1) {
-            pcre2len = sizeof(str_0);
-            res = pcre2_substring_copy_bynumber(match, 1, (PCRE2_UCHAR8 *)str_0, &pcre2len);
+            res = pcre_copy_substring((char *)str, ov, MAX_SUBSTRINGS, 1, str_0, sizeof(str_0));
             if (res < 0) {
-                SCLogError("pcre2_substring_copy_bynumber failed");
+                SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                 goto error;
             }
             args[0] = (char *)str_0;
 
             if (ret > 2) {
-                pcre2len = sizeof(str_1);
-                res = pcre2_substring_copy_bynumber(match, 2, (PCRE2_UCHAR8 *)str_1, &pcre2len);
+                res = pcre_copy_substring((char *)str, ov, MAX_SUBSTRINGS, 2, str_1, sizeof(str_1));
                 if (res < 0) {
-                    SCLogError("pcre2_substring_copy_bynumber failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
                 args[1] = (char *)str_1;
             }
             if (ret > 3) {
-                pcre2len = sizeof(str_2);
-                res = pcre2_substring_copy_bynumber(match, 3, (PCRE2_UCHAR8 *)str_2, &pcre2len);
+                res = pcre_copy_substring((char *)str, ov, MAX_SUBSTRINGS, 3, str_2, sizeof(str_2));
                 if (res < 0) {
-                    SCLogError("pcre2_substring_copy_bynumber failed");
+                    SCLogError(SC_ERR_PCRE_COPY_SUBSTRING, "pcre_copy_substring failed");
                     goto error;
                 }
                 args[2] = (char *)str_2;
             }
         }
 
-        fd = SCCalloc(1, sizeof(DetectFilestoreData));
+        fd = SCMalloc(sizeof(DetectFilestoreData));
         if (unlikely(fd == NULL))
             goto error;
+        memset(fd, 0x00, sizeof(DetectFilestoreData));
 
         if (args[0] != NULL) {
             SCLogDebug("first arg %s", args[0]);
@@ -462,36 +449,33 @@ static int DetectFilestoreSetup (DetectEngineCtx *de_ctx, Signature *s, const ch
             if (fd->scope == 0)
                 fd->scope = FILESTORE_SCOPE_DEFAULT;
         }
+
+        sm->ctx = (SigMatchCtx*)fd;
+    } else {
+        sm->ctx = (SigMatchCtx*)NULL;
     }
 
-    if (s->alproto == ALPROTO_HTTP1 || s->alproto == ALPROTO_HTTP) {
+    if (s->alproto == ALPROTO_HTTP) {
         AppLayerHtpNeedFileInspection();
     }
 
-    if (SCSigMatchAppendSMToList(
-                de_ctx, s, DETECT_FILESTORE, (SigMatchCtx *)fd, g_file_match_list_id) == NULL) {
-        DetectFilestoreFree(de_ctx, fd);
-        goto error;
-    }
-    s->filestore_ctx = fd;
+    SigMatchAppendSMToList(s, sm, g_file_match_list_id);
+    s->filestore_ctx = (const DetectFilestoreData *)sm->ctx;
 
-    if (SCSigMatchAppendSMToList(
-                de_ctx, s, DETECT_FILESTORE_POSTMATCH, NULL, DETECT_SM_LIST_POSTMATCH) == NULL) {
+    sm = SigMatchAlloc();
+    if (unlikely(sm == NULL))
         goto error;
-    }
+    sm->type = DETECT_FILESTORE_POSTMATCH;
+    sm->ctx = NULL;
+    SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_POSTMATCH);
+
 
     s->flags |= SIG_FLAG_FILESTORE;
-    de_ctx->filestore_cnt++;
-
-    if (match)
-        pcre2_match_data_free(match);
-
     return 0;
 
 error:
-    if (match) {
-        pcre2_match_data_free(match);
-    }
+    if (sm != NULL)
+        SCFree(sm);
     return -1;
 }
 

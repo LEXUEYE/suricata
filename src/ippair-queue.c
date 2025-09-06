@@ -25,6 +25,7 @@
 
 #include "suricata-common.h"
 #include "threads.h"
+#include "debug.h"
 #include "ippair-queue.h"
 #include "util-error.h"
 #include "util-debug.h"
@@ -39,11 +40,11 @@ IPPairQueue *IPPairQueueInit (IPPairQueue *q)
     return q;
 }
 
-IPPairQueue *IPPairQueueNew(void)
+IPPairQueue *IPPairQueueNew()
 {
     IPPairQueue *q = (IPPairQueue *)SCMalloc(sizeof(IPPairQueue));
     if (q == NULL) {
-        SCLogError("Fatal error encountered in IPPairQueueNew. Exiting...");
+        SCLogError(SC_ERR_FATAL, "Fatal error encountered in IPPairQueueNew. Exiting...");
         exit(EXIT_SUCCESS);
     }
     q = IPPairQueueInit(q);
@@ -130,4 +131,13 @@ IPPair *IPPairDequeue (IPPairQueue *q)
 
     HQLOCK_UNLOCK(q);
     return h;
+}
+
+uint32_t IPPairQueueLen(IPPairQueue *q)
+{
+    uint32_t len;
+    HQLOCK_LOCK(q);
+    len = q->len;
+    HQLOCK_UNLOCK(q);
+    return len;
 }

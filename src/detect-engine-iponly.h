@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,19 +21,33 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_ENGINE_IPONLY_H
-#define SURICATA_DETECT_ENGINE_IPONLY_H
+#ifndef __DETECT_ENGINE_IPONLY_H__
+#define __DETECT_ENGINE_IPONLY_H__
+
+/**
+ * SigNumArray is a bit array representing signatures
+ * it can be used linked to src/dst address to indicate
+ * which signatures apply to this addres
+ * at IP Only we store SigNumArrays at the radix trees
+ */
+typedef struct SigNumArray_ {
+    uint8_t *array; /* bit array of sig nums */
+    uint32_t size;  /* size in bytes of the array */
+} SigNumArray;
 
 void IPOnlyCIDRListFree(IPOnlyCIDRItem *tmphead);
 int IPOnlySigParseAddress(const DetectEngineCtx *, Signature *, const char *, char);
-void IPOnlyMatchPacket(ThreadVars *tv, const DetectEngineCtx *, DetectEngineThreadCtx *,
-        const DetectEngineIPOnlyCtx *, Packet *);
+void IPOnlyMatchPacket(ThreadVars *tv, const DetectEngineCtx *,
+                       DetectEngineThreadCtx *, const DetectEngineIPOnlyCtx *,
+                       DetectEngineIPOnlyThreadCtx *, Packet *);
 void IPOnlyInit(DetectEngineCtx *, DetectEngineIPOnlyCtx *);
 void IPOnlyPrint(DetectEngineCtx *, DetectEngineIPOnlyCtx *);
 void IPOnlyDeinit(DetectEngineCtx *, DetectEngineIPOnlyCtx *);
 void IPOnlyPrepare(DetectEngineCtx *);
-SigIntId IPOnlyTrackSigNum(DetectEngineIPOnlyCtx *, SigIntId);
+void DetectEngineIPOnlyThreadInit(DetectEngineCtx *, DetectEngineIPOnlyThreadCtx *);
+void DetectEngineIPOnlyThreadDeinit(DetectEngineIPOnlyThreadCtx *);
 void IPOnlyAddSignature(DetectEngineCtx *, DetectEngineIPOnlyCtx *, Signature *);
 void IPOnlyRegisterTests(void);
 
-#endif /* SURICATA_DETECT_ENGINE_IPONLY_H */
+#endif /* __DETECT_ENGINE_IPONLY_H__ */
+

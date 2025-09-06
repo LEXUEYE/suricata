@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_TM_QUEUES_H
-#define SURICATA_TM_QUEUES_H
+#ifndef __TM_QUEUES_H__
+#define __TM_QUEUES_H__
 
 #include "packet-queue.h"
 
@@ -43,4 +43,5 @@ void TmqDebugList(void);
 void TmqResetQueues(void);
 void TmValidateQueueState(void);
 
-#endif /* SURICATA_TM_QUEUES_H */
+#endif /* __TM_QUEUES_H__ */
+

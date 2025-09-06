@@ -22,11 +22,12 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_UTIL_PID_H
-#define SURICATA_UTIL_PID_H
+#ifndef __UTIL_PID_H__
+#define __UTIL_PID_H__
 
 int SCPidfileCreate(const char *);
 void SCPidfileRemove(const char *);
 int SCPidfileTestRunning(const char *pid_filename);
 
-#endif /* SURICATA_UTIL_PID_H */
+#endif /* __UTIL_PID_H__ */
+

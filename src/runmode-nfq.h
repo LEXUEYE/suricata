@@ -20,12 +20,12 @@
  *  \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_RUNMODE_NFQ_H
-#define SURICATA_RUNMODE_NFQ_H
+#ifndef __RUNMODE_NFQ_H__
+#define __RUNMODE_NFQ_H__
 
 int RunModeIpsNFQAutoFp(void);
 int RunModeIpsNFQWorker(void);
 void RunModeIpsNFQRegister(void);
 const char *RunModeIpsNFQGetDefaultMode(void);
 
-#endif /* SURICATA_RUNMODE_NFQ_H */
+#endif /* __RUNMODE_NFQ_H__ */

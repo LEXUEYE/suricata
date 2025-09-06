@@ -24,6 +24,7 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
 #include "decode.h"
 
 #include "detect.h"
@@ -87,13 +88,11 @@ static int DetectWindowMatch(DetectEngineThreadCtx *det_ctx, Packet *p,
 {
     const DetectWindowData *wd = (const DetectWindowData *)ctx;
 
-    DEBUG_VALIDATE_BUG_ON(PKT_IS_PSEUDOPKT(p));
-    if (!(PacketIsTCP(p)) || wd == NULL) {
+    if ( !(PKT_IS_TCP(p)) || wd == NULL || PKT_IS_PSEUDOPKT(p)) {
         return 0;
     }
 
-    const uint16_t window = TCP_GET_RAW_WINDOW(PacketGetTCP(p));
-    if ((!wd->negated && wd->size == window) || (wd->negated && wd->size != window)) {
+    if ( (!wd->negated && wd->size == TCP_GET_WINDOW(p)) || (wd->negated && wd->size != TCP_GET_WINDOW(p))) {
         return 1;
     }
 
@@ -112,13 +111,12 @@ static int DetectWindowMatch(DetectEngineThreadCtx *det_ctx, Packet *p,
 static DetectWindowData *DetectWindowParse(DetectEngineCtx *de_ctx, const char *windowstr)
 {
     DetectWindowData *wd = NULL;
-    int res = 0;
-    size_t pcre2len;
+    int ret = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
 
-    pcre2_match_data *match = NULL;
-    int ret = DetectParsePcreExec(&parse_regex, &match, windowstr, 0, 0);
+    ret = DetectParsePcreExec(&parse_regex, windowstr, 0, 0, ov, MAX_SUBSTRINGS);
     if (ret < 1 || ret > 3) {
-        SCLogError("pcre_exec parse error, ret %" PRId32 ", string %s", ret, windowstr);
+        SCLogError(SC_ERR_PCRE_MATCH, "pcre_exec parse error, ret %" PRId32 ", string %s", ret, windowstr);
         goto error;
     }
 
@@ -128,10 +126,10 @@ static DetectWindowData *DetectWindowParse(DetectEngineCtx *de_ctx, const char *
 
     if (ret > 1) {
         char copy_str[128] = "";
-        pcre2len = sizeof(copy_str);
-        res = SC_Pcre2SubstringCopy(match, 1, (PCRE2_UCHAR8 *)copy_str, &pcre2len);
+        res = pcre_copy_substring((char *)windowstr, ov, MAX_SUBSTRINGS, 1,
+                copy_str, sizeof(copy_str));
         if (res < 0) {
-            SCLogError("pcre2_substring_copy_bynumber failed");
+            SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
             goto error;
         }
 
@@ -142,28 +140,24 @@ static DetectWindowData *DetectWindowParse(DetectEngineCtx *de_ctx, const char *
             wd->negated = 0;
 
         if (ret > 2) {
-            pcre2len = sizeof(copy_str);
-            res = pcre2_substring_copy_bynumber(match, 2, (PCRE2_UCHAR8 *)copy_str, &pcre2len);
+            res = pcre_copy_substring((char *)windowstr, ov, MAX_SUBSTRINGS, 2,
+                    copy_str, sizeof(copy_str));
             if (res < 0) {
-                SCLogError("pcre2_substring_copy_bynumber failed");
+                SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
                 goto error;
             }
 
             /* Get the window size if it's a valid value (in packets, we
-             * should alert if this doesn't happen from decode) */
+             * should alert if this doesn't happend from decode) */
             if (StringParseUint16(&wd->size, 10, 0, copy_str) < 0) {
                 goto error;
             }
         }
     }
 
-    pcre2_match_data_free(match);
     return wd;
 
 error:
-    if (match) {
-        pcre2_match_data_free(match);
-    }
     if (wd != NULL)
         DetectWindowFree(de_ctx, wd);
     return NULL;
@@ -183,24 +177,28 @@ error:
 static int DetectWindowSetup (DetectEngineCtx *de_ctx, Signature *s, const char *windowstr)
 {
     DetectWindowData *wd = NULL;
+    SigMatch *sm = NULL;
 
     wd = DetectWindowParse(de_ctx, windowstr);
     if (wd == NULL) goto error;
 
     /* Okay so far so good, lets get this into a SigMatch
      * and put it in the Signature. */
-
-    if (SCSigMatchAppendSMToList(
-                de_ctx, s, DETECT_WINDOW, (SigMatchCtx *)wd, DETECT_SM_LIST_MATCH) == NULL) {
+    sm = SigMatchAlloc();
+    if (sm == NULL)
         goto error;
-    }
+
+    sm->type = DETECT_WINDOW;
+    sm->ctx = (SigMatchCtx *)wd;
+
+    SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_MATCH);
     s->flags |= SIG_FLAG_REQUIRE_PACKET;
 
     return 0;
 
 error:
-    if (wd != NULL)
-        DetectWindowFree(de_ctx, wd);
+    if (wd != NULL) DetectWindowFree(de_ctx, wd);
+    if (sm != NULL) SCFree(sm);
     return -1;
 
 }
@@ -224,13 +222,15 @@ void DetectWindowFree(DetectEngineCtx *de_ctx, void *ptr)
  */
 static int DetectWindowTestParse01 (void)
 {
+    int result = 0;
     DetectWindowData *wd = NULL;
     wd = DetectWindowParse(NULL, "35402");
-    FAIL_IF_NULL(wd);
-    FAIL_IF_NOT(wd->size == 35402);
+    if (wd != NULL &&wd->size==35402) {
+        DetectWindowFree(NULL, wd);
+        result = 1;
+    }
 
-    DetectWindowFree(NULL, wd);
-    PASS;
+    return result;
 }
 
 /**
@@ -238,14 +238,19 @@ static int DetectWindowTestParse01 (void)
  */
 static int DetectWindowTestParse02 (void)
 {
+    int result = 0;
     DetectWindowData *wd = NULL;
     wd = DetectWindowParse(NULL, "!35402");
-    FAIL_IF_NULL(wd);
-    FAIL_IF_NOT(wd->negated == 1);
-    FAIL_IF_NOT(wd->size == 35402);
+    if (wd != NULL) {
+        if (wd->negated == 1 && wd->size==35402) {
+            result = 1;
+        } else {
+            printf("expected wd->negated=1 and wd->size=35402\n");
+        }
+        DetectWindowFree(NULL, wd);
+    }
 
-    DetectWindowFree(NULL, wd);
-    PASS;
+    return result;
 }
 
 /**
@@ -253,12 +258,17 @@ static int DetectWindowTestParse02 (void)
  */
 static int DetectWindowTestParse03 (void)
 {
+    int result = 0;
     DetectWindowData *wd = NULL;
     wd = DetectWindowParse(NULL, "");
-    FAIL_IF_NOT_NULL(wd);
-
+    if (wd == NULL) {
+        result = 1;
+    } else {
+        printf("expected a NULL pointer (It was an empty string)\n");
+    }
     DetectWindowFree(NULL, wd);
-    PASS;
+
+    return result;
 }
 
 /**
@@ -266,12 +276,16 @@ static int DetectWindowTestParse03 (void)
  */
 static int DetectWindowTestParse04 (void)
 {
+    int result = 0;
     DetectWindowData *wd = NULL;
     wd = DetectWindowParse(NULL, "1235402");
-    FAIL_IF_NOT_NULL(wd);
+    if (wd != NULL) {
+        printf("expected a NULL pointer (It was exceeding the MAX window size)\n");
+        DetectWindowFree(NULL, wd);
+    }else
+        result=1;
 
-    DetectWindowFree(NULL, wd);
-    PASS;
+    return result;
 }
 
 /**
@@ -279,6 +293,7 @@ static int DetectWindowTestParse04 (void)
  */
 static int DetectWindowTestPacket01 (void)
 {
+    int result = 0;
     uint8_t *buf = (uint8_t *)"Hi all!";
     uint16_t buflen = strlen((char *)buf);
     Packet *p[3];
@@ -286,13 +301,14 @@ static int DetectWindowTestPacket01 (void)
     p[1] = UTHBuildPacket((uint8_t *)buf, buflen, IPPROTO_TCP);
     p[2] = UTHBuildPacket((uint8_t *)buf, buflen, IPPROTO_ICMP);
 
-    FAIL_IF(p[0] == NULL || p[1] == NULL || p[2] == NULL);
+    if (p[0] == NULL || p[1] == NULL ||p[2] == NULL)
+        goto end;
 
     /* TCP wwindow = 40 */
-    p[0]->l4.hdrs.tcph->th_win = htons(40);
+    p[0]->tcph->th_win = htons(40);
 
     /* TCP window = 41 */
-    p[1]->l4.hdrs.tcph->th_win = htons(41);
+    p[1]->tcph->th_win = htons(41);
 
     const char *sigs[2];
     sigs[0]= "alert tcp any any -> any any (msg:\"Testing window 1\"; window:40; sid:1;)";
@@ -307,10 +323,11 @@ static int DetectWindowTestPacket01 (void)
                               {0, 1},
                               /* packet 2 should not match */
                               {0, 0} };
-    FAIL_IF(UTHGenericTest(p, 3, sigs, sid, (uint32_t *)results, 2) == 0);
+    result = UTHGenericTest(p, 3, sigs, sid, (uint32_t *) results, 2);
 
     UTHFreePackets(p, 3);
-    PASS;
+end:
+    return result;
 }
 
 /**

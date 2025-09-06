@@ -15,8 +15,8 @@
  * 02110-1301, USA.
  */
 
-#ifndef SURICATA_UTIL_OPTIMIZE_H
-#define SURICATA_UTIL_OPTIMIZE_H
+#ifndef __UTIL_OPTIMIZE_H__
+#define __UTIL_OPTIMIZE_H__
 
 /**
  * \file
@@ -48,4 +48,5 @@
  */
 #define hw_barrier() __sync_synchronize()
 
-#endif /* SURICATA_UTIL_OPTIMIZE_H */
+#endif /* __UTIL_OPTIMIZE_H__ */
+

@@ -1,4 +1,4 @@
-/* Copyright (C) 2018-2021 Open Information Security Foundation
+/* Copyright (C) 2018 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -25,8 +25,6 @@
 
 #include "suricata-common.h"
 #include "device-storage.h"
-#include "util-device-private.h"
-#include "util-storage.h"
 #include "util-unittest.h"
 
 unsigned int LiveDevStorageSize(void)
@@ -58,12 +56,8 @@ unsigned int LiveDevStorageSize(void)
  * It has to be called once during the init of the sub system
  */
 
-LiveDevStorageId LiveDevStorageRegister(const char *name, const unsigned int size,
-        void *(*Alloc)(unsigned int), void (*Free)(void *))
-{
-    int id = StorageRegister(STORAGE_DEVICE, name, size, Alloc, Free);
-    LiveDevStorageId ldsi = { .id = id };
-    return ldsi;
+int LiveDevStorageRegister(const char *name, const unsigned int size, void *(*Alloc)(unsigned int), void (*Free)(void *)) {
+    return StorageRegister(STORAGE_DEVICE, name, size, Alloc, Free);
 }
 
 /**
@@ -74,9 +68,9 @@ LiveDevStorageId LiveDevStorageRegister(const char *name, const unsigned int siz
  * \param ptr pointer to the data to store
  */
 
-int LiveDevSetStorageById(LiveDevice *d, LiveDevStorageId id, void *ptr)
+int LiveDevSetStorageById(LiveDevice *d, int id, void *ptr)
 {
-    return StorageSetById(d->storage, STORAGE_DEVICE, id.id, ptr);
+    return StorageSetById((Storage *)((void *)d + sizeof(LiveDevice)), STORAGE_DEVICE, id, ptr);
 }
 
 /**
@@ -87,9 +81,9 @@ int LiveDevSetStorageById(LiveDevice *d, LiveDevStorageId id, void *ptr)
  *
  */
 
-void *LiveDevGetStorageById(LiveDevice *d, LiveDevStorageId id)
+void *LiveDevGetStorageById(LiveDevice *d, int id)
 {
-    return StorageGetById(d->storage, STORAGE_DEVICE, id.id);
+    return StorageGetById((Storage *)((void *)d + sizeof(LiveDevice)), STORAGE_DEVICE, id);
 }
 
 /**
@@ -98,10 +92,20 @@ void *LiveDevGetStorageById(LiveDevice *d, LiveDevStorageId id)
 
 /* Start of "private" function */
 
+void *LiveDevAllocStorageById(LiveDevice *d, int id)
+{
+    return StorageAllocByIdPrealloc((Storage *)((void *)d + sizeof(LiveDevice)), STORAGE_DEVICE, id);
+}
+
+void LiveDevFreeStorageById(LiveDevice *d, int id)
+{
+    StorageFreeById((Storage *)((void *)d + sizeof(LiveDevice)), STORAGE_DEVICE, id);
+}
+
 void LiveDevFreeStorage(LiveDevice *d)
 {
     if (LiveDevStorageSize() > 0)
-        StorageFreeAll(d->storage, STORAGE_DEVICE);
+        StorageFreeAll((Storage *)((void *)d + sizeof(LiveDevice)), STORAGE_DEVICE);
 }
 
 

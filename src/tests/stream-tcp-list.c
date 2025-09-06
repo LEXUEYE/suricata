@@ -28,8 +28,9 @@
 
 static int VALIDATE(TcpStream *stream, uint8_t *data, uint32_t data_len)
 {
-    // HACK: these tests should be updated to check the SBB blocks
-    if (memcmp(stream->sb.region.buf, data, data_len) != 0) {
+    if (StreamingBufferCompareRawData(&stream->sb,
+                data, data_len) == 0)
+    {
         SCReturnInt(0);
     }
     SCLogInfo("OK");

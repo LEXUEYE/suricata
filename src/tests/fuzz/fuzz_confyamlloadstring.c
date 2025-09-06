@@ -1,11 +1,11 @@
 /**
  * @file
  * @author Philippe Antoine <contact@catenacyber.fr>
- * fuzz target for SCConfYamlLoadString
+ * fuzz target for ConfYamlLoadString
  */
 
+
 #include "suricata-common.h"
-#include "suricata.h"
 #include "conf-yaml-loader.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
@@ -20,11 +20,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         setenv("SC_LOG_FILE", "/dev/null", 0);
         //global init
         InitGlobal();
-        SCRunmodeSet(RUNMODE_UNITTEST);
+        run_mode = RUNMODE_UNITTEST;
         initialized = 1;
     }
 
-    SCConfYamlLoadString((const char *)data, size);
+    ConfYamlLoadString((const char *) data, size);
 
     return 0;
 }

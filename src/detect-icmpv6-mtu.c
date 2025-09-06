@@ -58,20 +58,22 @@ void DetectICMPv6mtuRegister(void)
 #endif
     sigmatch_table[DETECT_ICMPV6MTU].SupportsPrefilter = PrefilterIcmpv6mtuIsPrefilterable;
     sigmatch_table[DETECT_ICMPV6MTU].SetupPrefilter = PrefilterSetupIcmpv6mtu;
+
+    DetectUintRegister();
+    return;
 }
 
 // returns 0 on no mtu, and 1 if mtu
 static inline int DetectICMPv6mtuGetValue(Packet *p, uint32_t *picmpv6mtu)
 {
-    if (!(PacketIsICMPv6(p)))
+    if (!(PKT_IS_ICMPV6(p)) || PKT_IS_PSEUDOPKT(p))
         return 0;
-    const ICMPV6Hdr *icmpv6h = PacketGetICMPv6(p);
-    if (ICMPV6_GET_CODE(icmpv6h) != 0)
+    if (ICMPV6_GET_CODE(p) != 0)
         return 0;
-    if (!(ICMPV6_HAS_MTU(icmpv6h)))
+    if (!(ICMPV6_HAS_MTU(p)))
         return 0;
 
-    *picmpv6mtu = ICMPV6_GET_MTU(icmpv6h);
+    *picmpv6mtu = ICMPV6_GET_MTU(p);
     return 1;
 }
 
@@ -89,8 +91,6 @@ static inline int DetectICMPv6mtuGetValue(Packet *p, uint32_t *picmpv6mtu)
 static int DetectICMPv6mtuMatch (DetectEngineThreadCtx *det_ctx, Packet *p,
         const Signature *s, const SigMatchCtx *ctx)
 {
-    DEBUG_VALIDATE_BUG_ON(PKT_IS_PSEUDOPKT(p));
-
     uint32_t picmpv6mtu;
     if (DetectICMPv6mtuGetValue(p, &picmpv6mtu) == 0) {
         return 0;
@@ -116,11 +116,16 @@ static int DetectICMPv6mtuSetup (DetectEngineCtx *de_ctx, Signature *s, const ch
     if (icmpv6mtud == NULL)
         return -1;
 
-    if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_ICMPV6MTU, (SigMatchCtx *)icmpv6mtud,
-                DETECT_SM_LIST_MATCH) == NULL) {
+    SigMatch *sm = SigMatchAlloc();
+    if (sm == NULL) {
         DetectICMPv6mtuFree(de_ctx, icmpv6mtud);
         return -1;
     }
+
+    sm->type = DETECT_ICMPV6MTU;
+    sm->ctx = (SigMatchCtx *)icmpv6mtud;
+
+    SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_MATCH);
     s->flags |= SIG_FLAG_REQUIRE_PACKET;
     s->proto.flags |= DETECT_PROTO_IPV6;
 
@@ -134,7 +139,7 @@ static int DetectICMPv6mtuSetup (DetectEngineCtx *de_ctx, Signature *s, const ch
  */
 void DetectICMPv6mtuFree(DetectEngineCtx *de_ctx, void *ptr)
 {
-    SCDetectU32Free(ptr);
+    SCFree(ptr);
 }
 
 /* prefilter code */
@@ -142,8 +147,6 @@ void DetectICMPv6mtuFree(DetectEngineCtx *de_ctx, void *ptr)
 static void
 PrefilterPacketIcmpv6mtuMatch(DetectEngineThreadCtx *det_ctx, Packet *p, const void *pectx)
 {
-    DEBUG_VALIDATE_BUG_ON(PKT_IS_PSEUDOPKT(p));
-
     uint32_t picmpv6mtu;
     if (DetectICMPv6mtuGetValue(p, &picmpv6mtu) == 0) {
         return;
@@ -152,7 +155,7 @@ PrefilterPacketIcmpv6mtuMatch(DetectEngineThreadCtx *det_ctx, Packet *p, const v
     /* during setup Suricata will automatically see if there is another
      * check that can be added: alproto, sport or dport */
     const PrefilterPacketHeaderCtx *ctx = pectx;
-    if (!PrefilterPacketHeaderExtraMatch(ctx, p))
+    if (PrefilterPacketHeaderExtraMatch(ctx, p) == FALSE)
         return;
 
     /* if we match, add all the sigs that use this prefilter. This means
@@ -170,8 +173,10 @@ PrefilterPacketIcmpv6mtuMatch(DetectEngineThreadCtx *det_ctx, Packet *p, const v
 
 static int PrefilterSetupIcmpv6mtu(DetectEngineCtx *de_ctx, SigGroupHead *sgh)
 {
-    return PrefilterSetupPacketHeader(de_ctx, sgh, DETECT_ICMPV6MTU, SIG_MASK_REQUIRE_REAL_PKT,
-            PrefilterPacketU32Set, PrefilterPacketU32Compare, PrefilterPacketIcmpv6mtuMatch);
+    return PrefilterSetupPacketHeader(de_ctx, sgh, DETECT_ICMPV6MTU,
+            PrefilterPacketU32Set,
+            PrefilterPacketU32Compare,
+            PrefilterPacketIcmpv6mtuMatch);
 }
 
 static bool PrefilterIcmpv6mtuIsPrefilterable(const Signature *s)

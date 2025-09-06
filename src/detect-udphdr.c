@@ -27,7 +27,6 @@
 #include "detect.h"
 #include "detect-parse.h"
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-prefilter.h"
 #include "detect-engine-content-inspection.h"
@@ -65,7 +64,9 @@ void DetectUdphdrRegister(void)
 
     DetectPktMpmRegister("udp.hdr", 2, PrefilterGenericMpmPktRegister, GetData);
 
-    DetectPktInspectEngineRegister("udp.hdr", GetData, DetectEngineInspectPktBufferGeneric);
+    DetectPktInspectEngineRegister("udp.hdr", GetData,
+            DetectEngineInspectPktBufferGeneric);
+    return;
 }
 
 /**
@@ -85,7 +86,7 @@ static int DetectUdphdrSetup (DetectEngineCtx *de_ctx, Signature *s, const char 
 
     s->flags |= SIG_FLAG_REQUIRE_PACKET;
 
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_udphdr_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_udphdr_buffer_id) < 0)
         return -1;
 
     return 0;
@@ -98,22 +99,23 @@ static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
 
     InspectionBuffer *buffer = InspectionBufferGet(det_ctx, list_id);
     if (buffer->inspect == NULL) {
-        if (!PacketIsUDP(p)) {
+        if (p->udph == NULL) {
             return NULL;
         }
-        const UDPHdr *udph = PacketGetUDP(p);
-        if (((uint8_t *)udph + (ptrdiff_t)UDP_HEADER_LEN) >
-                ((uint8_t *)GET_PKT_DATA(p) + (ptrdiff_t)GET_PKT_LEN(p))) {
-            SCLogDebug("data out of range: %p > %p", ((uint8_t *)udph + (ptrdiff_t)UDP_HEADER_LEN),
+        if (((uint8_t *)p->udph + (ptrdiff_t)UDP_HEADER_LEN) >
+                ((uint8_t *)GET_PKT_DATA(p) + (ptrdiff_t)GET_PKT_LEN(p)))
+        {
+            SCLogDebug("data out of range: %p > %p",
+                    ((uint8_t *)p->udph + (ptrdiff_t)UDP_HEADER_LEN),
                     ((uint8_t *)GET_PKT_DATA(p) + (ptrdiff_t)GET_PKT_LEN(p)));
             return NULL;
         }
 
         const uint32_t data_len = UDP_HEADER_LEN;
-        const uint8_t *data = (const uint8_t *)udph;
+        const uint8_t *data = (const uint8_t *)p->udph;
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, data, data_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, data, data_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;

@@ -21,9 +21,9 @@
  * \author Giuseppe Longo <giuseppe@glongo.it>
  */
 
-#ifndef SURICATA_DETECT_SIP_METHOD_H
-#define SURICATA_DETECT_SIP_METHOD_H
+#ifndef __DETECT_SIP_METHOD_H__
+#define __DETECT_SIP_METHOD_H__
 
 void DetectSipMethodRegister(void);
 
-#endif /* SURICATA_DETECT_SIP_METHOD_H */
+#endif /* __DETECT_SIP_METHOD_H__ */

@@ -21,24 +21,24 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_STREAM_H
-#define SURICATA_STREAM_H
+#ifndef __STREAM_H__
+#define __STREAM_H__
 
-#include "decode.h"
-#include "stream-tcp-private.h"
+#include "flow.h"
 
-#define STREAM_FLAGS_FOR_PACKET(p) (PKT_IS_TOSERVER((p)) ? STREAM_TOSERVER : STREAM_TOCLIENT)
+#define STREAM_START        BIT_U8(0)
+#define STREAM_EOF          BIT_U8(1)
+#define STREAM_TOSERVER     BIT_U8(2)
+#define STREAM_TOCLIENT     BIT_U8(3)
+#define STREAM_GAP          BIT_U8(4)   /**< data gap encountered */
+#define STREAM_DEPTH        BIT_U8(5)   /**< depth reached */
+#define STREAM_MIDSTREAM    BIT_U8(6)
+#define STREAM_FLUSH        BIT_U8(7)
 
-#define STREAM_DUMP_TOCLIENT BIT_U8(1)
-#define STREAM_DUMP_TOSERVER BIT_U8(2)
-#define STREAM_DUMP_HEADERS  BIT_U8(3)
-
-typedef int (*StreamSegmentCallback)(
-        const Packet *, TcpSegment *, void *, const uint8_t *, uint32_t);
+typedef int (*StreamSegmentCallback)(const Packet *, void *, const uint8_t *, uint32_t);
 int StreamSegmentForEach(const Packet *p, uint8_t flag,
                          StreamSegmentCallback CallbackFunc,
                          void *data);
-int StreamSegmentForSession(
-        const Packet *p, uint8_t flag, StreamSegmentCallback CallbackFunc, void *data);
 
-#endif /* SURICATA_STREAM_H */
+#endif /* __STREAM_H__ */
+

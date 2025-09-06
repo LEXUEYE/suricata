@@ -21,10 +21,11 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_FLOW_QUEUE_H
-#define SURICATA_FLOW_QUEUE_H
+#ifndef __FLOW_QUEUE_H__
+#define __FLOW_QUEUE_H__
 
 #include "suricata-common.h"
+#include "flow.h"
 
 /** Spinlocks or Mutex for the flow queues. */
 //#define FQLOCK_SPIN
@@ -84,6 +85,7 @@ void FlowQueueDestroy (FlowQueue *);
 void FlowEnqueue (FlowQueue *, Flow *);
 Flow *FlowDequeue (FlowQueue *);
 void FlowQueueRemove(FlowQueue *fq, Flow *f);
+void FlowQueueRemoveLock(FlowQueue *fq, Flow *f);
 
 void FlowQueuePrivateAppendFlow(FlowQueuePrivate *fqc, Flow *f);
 void FlowQueuePrivatePrependFlow(FlowQueuePrivate *fqc, Flow *f);
@@ -93,4 +95,5 @@ void FlowQueuePrivateAppendPrivate(FlowQueuePrivate *dest, FlowQueuePrivate *src
 FlowQueuePrivate FlowQueueExtractPrivate(FlowQueue *fq);
 Flow *FlowQueuePrivateGetFromTop(FlowQueuePrivate *fqp);
 
-#endif /* SURICATA_FLOW_QUEUE_H */
+#endif /* __FLOW_QUEUE_H__ */
+

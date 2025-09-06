@@ -28,10 +28,11 @@
  */
 
 #include "suricata-common.h"
+
 #include "conf.h"
+
 #include "util-unittest.h"
 #include "util-magic.h"
-#include "util-debug.h"
 
 #ifdef HAVE_MAGIC
 
@@ -46,11 +47,13 @@ magic_t MagicInitContext(void)
 
     ctx = magic_open(0);
     if (ctx == NULL) {
-        SCLogError("magic_open failed: %s", magic_error(ctx));
+        SCLogError(SC_ERR_MAGIC_OPEN, "magic_open failed: %s",
+                magic_error(ctx));
         goto error;
     }
 
-    (void)SCConfGet("magic-file", &filename);
+    (void)ConfGet("magic-file", &filename);
+
 
     if (filename != NULL) {
         if (strlen(filename) == 0) {
@@ -63,7 +66,8 @@ magic_t MagicInitContext(void)
             SCLogConfig("using magic-file %s", filename);
 
             if ( (fd = fopen(filename, "r")) == NULL) {
-                SCLogWarning("Error opening file: \"%s\": %s", filename, strerror(errno));
+                SCLogWarning(SC_ERR_FOPEN, "Error opening file: \"%s\": %s",
+                        filename, strerror(errno));
                 goto error;
             }
             fclose(fd);
@@ -71,7 +75,8 @@ magic_t MagicInitContext(void)
     }
 
     if (magic_load(ctx, filename) != 0) {
-        SCLogError("magic_load failed: %s", magic_error(ctx));
+        SCLogError(SC_ERR_MAGIC_LOAD, "magic_load failed: %s",
+                magic_error(ctx));
         goto error;
     }
     return ctx;
@@ -109,7 +114,7 @@ char *MagicThreadLookup(magic_t *ctx, const uint8_t *buf, uint32_t buflen)
         if (result != NULL) {
             magic = SCStrdup(result);
             if (unlikely(magic == NULL)) {
-                SCLogError("Unable to dup magic");
+                SCLogError(SC_ERR_MEM_ALLOC, "Unable to dup magic");
             }
         }
     }
@@ -118,6 +123,12 @@ char *MagicThreadLookup(magic_t *ctx, const uint8_t *buf, uint32_t buflen)
 }
 
 #ifdef UNITTESTS
+
+#if defined OS_FREEBSD || defined OS_DARWIN
+#define MICROSOFT_OFFICE_DOC "OLE 2 Compound Document"
+#else
+#define MICROSOFT_OFFICE_DOC "Microsoft Office Document"
+#endif
 
 /** \test magic lib calls -- init */
 static int MagicInitTest01(void)

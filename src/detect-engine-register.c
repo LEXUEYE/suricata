@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2024 Open Information Security Foundation
+/* Copyright (C) 2007-2017 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,9 +21,9 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#include "detect-smb-ntlmssp.h"
 #include "suricata-common.h"
 #include "suricata.h"
+#include "debug.h"
 #include "detect.h"
 #include "flow.h"
 #include "flow-private.h"
@@ -43,21 +43,16 @@
 #include "detect-engine-threshold.h"
 #include "detect-engine-prefilter.h"
 
-#include "rust.h"
-
 #include "detect-engine-payload.h"
 #include "detect-engine-dcepayload.h"
-#include "detect-dns-name.h"
-#include "detect-dns-response.h"
+#include "detect-dns-opcode.h"
+#include "detect-dns-query.h"
 #include "detect-tls-sni.h"
 #include "detect-tls-certs.h"
 #include "detect-tls-cert-fingerprint.h"
 #include "detect-tls-cert-issuer.h"
 #include "detect-tls-cert-subject.h"
 #include "detect-tls-cert-serial.h"
-#include "detect-tls-alpn.h"
-#include "detect-tls-subjectaltname.h"
-#include "detect-tls-random.h"
 #include "detect-tls-ja3-hash.h"
 #include "detect-tls-ja3-string.h"
 #include "detect-tls-ja3s-hash.h"
@@ -70,7 +65,6 @@
 #include "detect-http-ua.h"
 #include "detect-http-host.h"
 
-#include "detect-mark.h"
 #include "detect-nfs-procedure.h"
 #include "detect-nfs-version.h"
 
@@ -80,12 +74,9 @@
 #include "detect-config.h"
 
 #include "detect-smb-share.h"
-#include "detect-smb-version.h"
-#include "detect-smtp.h"
 
 #include "detect-base64-decode.h"
 #include "detect-base64-data.h"
-#include "detect-ipaddr.h"
 #include "detect-ipopts.h"
 #include "detect-tcp-flags.h"
 #include "detect-fragbits.h"
@@ -119,18 +110,14 @@
 #include "detect-msg.h"
 #include "detect-rev.h"
 #include "detect-flow.h"
-#include "detect-flow-age.h"
-#include "detect-flow-pkts.h"
-#include "detect-requires.h"
 #include "detect-tcp-window.h"
-#include "detect-tcp-wscale.h"
 #include "detect-ftpbounce.h"
-#include "detect-ftp-dynamic-port.h"
 #include "detect-isdataat.h"
 #include "detect-id.h"
 #include "detect-rpc.h"
 #include "detect-asn1.h"
 #include "detect-filename.h"
+#include "detect-fileext.h"
 #include "detect-filestore.h"
 #include "detect-filemagic.h"
 #include "detect-filemd5.h"
@@ -182,7 +169,6 @@
 #include "detect-replace.h"
 #include "detect-tos.h"
 #include "detect-app-layer-event.h"
-#include "detect-app-layer-state.h"
 #include "detect-lua.h"
 #include "detect-iprep.h"
 #include "detect-geoip.h"
@@ -200,30 +186,51 @@
 #include "detect-krb5-errcode.h"
 #include "detect-krb5-msgtype.h"
 #include "detect-krb5-sname.h"
-#include "detect-krb5-ticket-encryption.h"
 #include "detect-sip-method.h"
 #include "detect-sip-uri.h"
+#include "detect-sip-protocol.h"
+#include "detect-sip-stat-code.h"
+#include "detect-sip-stat-msg.h"
+#include "detect-sip-request-line.h"
+#include "detect-sip-response-line.h"
+#include "detect-rfb-secresult.h"
+#include "detect-rfb-sectype.h"
+#include "detect-rfb-name.h"
 #include "detect-target.h"
-#include "detect-quic-sni.h"
-#include "detect-quic-ua.h"
-#include "detect-quic-version.h"
-#include "detect-quic-cyu-hash.h"
-#include "detect-quic-cyu-string.h"
-#include "detect-ja4-hash.h"
-#include "detect-ftp-command.h"
-#include "detect-entropy.h"
-#include "detect-ftp-command-data.h"
-#include "detect-ftp-completion-code.h"
-#include "detect-ftp-reply.h"
-#include "detect-ftp-mode.h"
-#include "detect-ftp-reply-received.h"
+#include "detect-template-rust-buffer.h"
+#include "detect-snmp-version.h"
+#include "detect-snmp-community.h"
+#include "detect-snmp-pdu_type.h"
+#include "detect-mqtt-type.h"
+#include "detect-mqtt-flags.h"
+#include "detect-mqtt-qos.h"
+#include "detect-mqtt-protocol-version.h"
+#include "detect-mqtt-reason-code.h"
+#include "detect-mqtt-connect-flags.h"
+#include "detect-mqtt-connect-clientid.h"
+#include "detect-mqtt-connect-username.h"
+#include "detect-mqtt-connect-password.h"
+#include "detect-mqtt-connect-willtopic.h"
+#include "detect-mqtt-connect-willmessage.h"
+#include "detect-mqtt-connack-sessionpresent.h"
+#include "detect-mqtt-publish-topic.h"
+#include "detect-mqtt-publish-message.h"
+#include "detect-mqtt-subscribe-topic.h"
+#include "detect-mqtt-unsubscribe-topic.h"
 
+#include "detect-template-buffer.h"
 #include "detect-bypass.h"
 #include "detect-ftpdata.h"
 #include "detect-engine-content-inspection.h"
 
+#include "detect-transform-compress-whitespace.h"
+#include "detect-transform-strip-whitespace.h"
+#include "detect-transform-md5.h"
+#include "detect-transform-sha1.h"
+#include "detect-transform-sha256.h"
+#include "detect-transform-dotprefix.h"
 #include "detect-transform-pcrexform.h"
-#include "detect-transform-luaxform.h"
+#include "detect-transform-urldecode.h"
 
 #include "util-rule-vars.h"
 
@@ -231,7 +238,7 @@
 #include "app-layer-protos.h"
 #include "app-layer-htp.h"
 #include "app-layer-smtp.h"
-#include "detect-frame.h"
+#include "app-layer-template.h"
 #include "detect-tls.h"
 #include "detect-tls-cert-validity.h"
 #include "detect-tls-version.h"
@@ -247,17 +254,8 @@
 #include "detect-ssl-version.h"
 #include "detect-ssl-state.h"
 #include "detect-modbus.h"
+#include "detect-cipservice.h"
 #include "detect-dnp3.h"
-#include "detect-ike-exch-type.h"
-#include "detect-ike-spi.h"
-#include "detect-ike-vendor.h"
-#include "detect-ike-chosen-sa.h"
-#include "detect-ike-key-exchange-payload-length.h"
-#include "detect-ike-nonce-payload-length.h"
-#include "detect-ike-nonce-payload.h"
-#include "detect-ike-key-exchange-payload.h"
-#include "detect-vlan.h"
-#include "detect-email.h"
 
 #include "action-globals.h"
 #include "tm-threads.h"
@@ -286,9 +284,6 @@
 #include "util-path.h"
 #include "util-mpm-ac.h"
 #include "runmodes.h"
-
-int DETECT_TBLSIZE = 0;
-int DETECT_TBLSIZE_IDX = DETECT_TBLSIZE_STATIC;
 
 static void PrintFeatureList(const SigTableElmt *e, char sep)
 {
@@ -323,12 +318,6 @@ static void PrintFeatureList(const SigTableElmt *e, char sep)
         printf("sticky buffer");
         prev = 1;
     }
-    if (flags & SIGMATCH_SUPPORT_FIREWALL) {
-        if (prev == 1)
-            printf("%c", sep);
-        printf("supports firewall");
-        prev = 1;
-    }
     if (e->Transform) {
         if (prev == 1)
             printf("%c", sep);
@@ -346,7 +335,7 @@ static void PrintFeatureList(const SigTableElmt *e, char sep)
     }
 }
 
-static void SigMultilinePrint(size_t i, const char *prefix)
+static void SigMultilinePrint(int i, const char *prefix)
 {
     if (sigmatch_table[i].desc) {
         printf("%sDescription: %s\n", prefix, sigmatch_table[i].desc);
@@ -362,27 +351,9 @@ static void SigMultilinePrint(size_t i, const char *prefix)
     printf("\n");
 }
 
-/** \brief Check if a keyword exists. */
-bool SigTableHasKeyword(const char *keyword)
+void SigTableList(const char *keyword)
 {
-    for (int i = 0; i < DETECT_TBLSIZE; i++) {
-        const char *name = sigmatch_table[i].name;
-
-        if (name == NULL || strlen(name) == 0) {
-            continue;
-        }
-
-        if (strcmp(keyword, name) == 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-int SigTableList(const char *keyword)
-{
-    size_t size = DETECT_TBLSIZE;
+    size_t size = sizeof(sigmatch_table) / sizeof(SigTableElmt);
     size_t i;
 
     if (keyword == NULL) {
@@ -393,7 +364,11 @@ int SigTableList(const char *keyword)
                 if (name[0] == '_' || strcmp(name, "template") == 0)
                     continue;
 
-                printf("- %s\n", name);
+                if (sigmatch_table[i].flags & SIGMATCH_NOT_BUILT) {
+                    printf("- %s (not built-in)\n", name);
+                } else {
+                    printf("- %s\n", name);
+                }
             }
         }
     } else if (strcmp("csv", keyword) == 0) {
@@ -401,6 +376,9 @@ int SigTableList(const char *keyword)
         for (i = 0; i < size; i++) {
             const char *name = sigmatch_table[i].name;
             if (name != NULL && strlen(name) > 0) {
+                if (sigmatch_table[i].flags & SIGMATCH_NOT_BUILT) {
+                    continue;
+                }
                 if (name[0] == '_' || strcmp(name, "template") == 0)
                     continue;
 
@@ -434,94 +412,21 @@ int SigTableList(const char *keyword)
             if ((sigmatch_table[i].name != NULL) &&
                 strcmp(sigmatch_table[i].name, keyword) == 0) {
                 printf("= %s =\n", sigmatch_table[i].name);
+                if (sigmatch_table[i].flags & SIGMATCH_NOT_BUILT) {
+                    printf("Not built-in\n");
+                    return;
+                }
                 SigMultilinePrint(i, "");
-                return TM_ECODE_DONE;
+                return;
             }
         }
-        printf("Non existing keyword\n");
-        return TM_ECODE_FAILED;
     }
-    return TM_ECODE_DONE;
-}
-
-static void DetectFileHandlerRegister(void)
-{
-    for (int i = 0; i < DETECT_TBLSIZE_STATIC; i++) {
-        if (filehandler_table[i].name)
-            DetectFileRegisterFileProtocols(&filehandler_table[i]);
-    }
-}
-
-static void SigCleanCString(SigTableElmt *base)
-{
-    SCSigTableNamesElmt kw;
-    // remove const for mut to release
-    kw.name = (char *)base->name;
-    kw.desc = (char *)base->desc;
-    kw.url = (char *)base->url;
-    SCDetectSigMatchNamesFree(&kw);
-}
-
-void SCDetectHelperKeywordSetCleanCString(uint16_t id)
-{
-    sigmatch_table[id].Cleanup = SigCleanCString;
-}
-
-void SigTableCleanup(void)
-{
-    if (sigmatch_table != NULL) {
-        for (int i = 0; i < DETECT_TBLSIZE; i++) {
-            if ((sigmatch_table[i].Cleanup) == NULL) {
-                continue;
-            }
-            sigmatch_table[i].Cleanup(&sigmatch_table[i]);
-        }
-        SCFree(sigmatch_table);
-        sigmatch_table = NULL;
-        DETECT_TBLSIZE = 0;
-    }
-}
-
-#define ARRAY_CAP_STEP 16
-static void (**PreregisteredCallbacks)(void) = NULL;
-static size_t preregistered_callbacks_nb = 0;
-static size_t preregistered_callbacks_cap = 0;
-
-// Plugins can preregister keywords with this function :
-// When an app-layer plugin is loaded, it wants to register its keywords
-// But the plugin is loaded before keywords can register
-// The preregistration callbacks will later be called by SigTableSetup
-int SCSigTablePreRegister(void (*KeywordsRegister)(void))
-{
-    if (preregistered_callbacks_nb == preregistered_callbacks_cap) {
-        void *tmp = SCRealloc(PreregisteredCallbacks,
-                sizeof(void *) * (preregistered_callbacks_cap + ARRAY_CAP_STEP));
-        if (tmp == NULL) {
-            return 1;
-        }
-        preregistered_callbacks_cap += ARRAY_CAP_STEP;
-        PreregisteredCallbacks = tmp;
-    }
-    PreregisteredCallbacks[preregistered_callbacks_nb] = KeywordsRegister;
-    preregistered_callbacks_nb++;
-    return 0;
-}
-
-void SigTableInit(void)
-{
-    if (sigmatch_table == NULL) {
-        DETECT_TBLSIZE = DETECT_TBLSIZE_STATIC + DETECT_TBLSIZE_STEP;
-        sigmatch_table = SCCalloc(DETECT_TBLSIZE, sizeof(SigTableElmt));
-        if (sigmatch_table == NULL) {
-            DETECT_TBLSIZE = 0;
-            FatalError("Could not allocate sigmatch_table");
-        }
-    }
+    return;
 }
 
 void SigTableSetup(void)
 {
-    DetectRegisterAppLayerHookLists();
+    memset(sigmatch_table, 0, sizeof(sigmatch_table));
 
     DetectSidRegister();
     DetectPriorityRegister();
@@ -548,8 +453,6 @@ void SigTableSetup(void)
     DetectHttpResponseLineRegister();
     DetectHttpServerBodyRegister();
     DetectHttpHeaderRegister();
-    DetectHttpRequestHeaderRegister();
-    DetectHttpResponseHeaderRegister();
     DetectHttpHeaderNamesRegister();
     DetectHttpHeadersRegister();
     DetectHttpProtocolRegister();
@@ -559,6 +462,7 @@ void SigTableSetup(void)
     DetectHttpCookieRegister();
 
     DetectFilenameRegister();
+    DetectFileextRegister();
     DetectFilestoreRegister();
     DetectFilemagicRegister();
     DetectFileMd5Register();
@@ -573,19 +477,12 @@ void SigTableSetup(void)
     DetectHttpStatCodeRegister();
     DetectHttp2Register();
 
-    DetectDnsNameRegister();
-    DetectDnsResponseRegister();
+    DetectDnsQueryRegister();
+    DetectDnsOpcodeRegister();
     DetectModbusRegister();
+    DetectCipServiceRegister();
+    DetectEnipCommandRegister();
     DetectDNP3Register();
-
-    DetectIkeExchTypeRegister();
-    DetectIkeSpiRegister();
-    DetectIkeVendorRegister();
-    DetectIkeChosenSaRegister();
-    DetectIkeKeyExchangePayloadLengthRegister();
-    DetectIkeNoncePayloadLengthRegister();
-    DetectIkeNonceRegister();
-    DetectIkeKeyExchangeRegister();
 
     DetectTlsSniRegister();
     DetectTlsIssuerRegister();
@@ -593,10 +490,6 @@ void SigTableSetup(void)
     DetectTlsSerialRegister();
     DetectTlsFingerprintRegister();
     DetectTlsCertsRegister();
-    DetectTlsCertChainLenRegister();
-    DetectTlsSubjectAltNameRegister();
-    DetectTlsAlpnRegister();
-    DetectTlsRandomRegister();
 
     DetectTlsJa3HashRegister();
     DetectTlsJa3StringRegister();
@@ -604,10 +497,7 @@ void SigTableSetup(void)
     DetectTlsJa3SStringRegister();
 
     DetectAppLayerEventRegister();
-    DetectAppLayerStateRegister();
     /* end of order dependent regs */
-
-    DetectFrameRegister();
 
     DetectPcreRegister();
     DetectDepthRegister();
@@ -616,7 +506,6 @@ void SigTableSetup(void)
     DetectBytetestRegister();
     DetectBytejumpRegister();
     DetectBytemathRegister();
-    DetectEntropyRegister();
     DetectSameipRegister();
     DetectGeoipRegister();
     DetectL3ProtoRegister();
@@ -626,19 +515,10 @@ void SigTableSetup(void)
     DetectOffsetRegister();
     DetectReplaceRegister();
     DetectFlowRegister();
-    DetectFlowAgeRegister();
-    DetectFlowPktsRegister();
-    DetectFlowPktsToServerRegister();
-    DetectFlowPktsToClientRegister();
-    DetectFlowBytesRegister();
-    DetectFlowBytesToServerRegister();
-    DetectFlowBytesToClientRegister();
-    DetectRequiresRegister();
     DetectWindowRegister();
     DetectRpcRegister();
     DetectFtpbounceRegister();
     DetectFtpdataRegister();
-    DetectFtpDynamicPortRegister();
     DetectIsdataatRegister();
     DetectIdRegister();
     DetectDsizeRegister();
@@ -673,9 +553,6 @@ void SigTableSetup(void)
     DetectDceStubDataRegister();
     DetectSmbNamedPipeRegister();
     DetectSmbShareRegister();
-    DetectSmbNtlmsspUserRegister();
-    DetectSmbNtlmsspDomainRegister();
-    DetectSmbVersionRegister();
     DetectTlsRegister();
     DetectTlsValidityRegister();
     DetectTlsVersionRegister();
@@ -708,76 +585,58 @@ void SigTableSetup(void)
     DetectTcphdrRegister();
     DetectUdphdrRegister();
     DetectTcpmssRegister();
-    DetectTcpWscaleRegister();
     DetectICMPv6hdrRegister();
     DetectICMPv6mtuRegister();
-    DetectIPAddrBufferRegister();
     DetectIpv4hdrRegister();
     DetectIpv6hdrRegister();
     DetectKrb5CNameRegister();
     DetectKrb5ErrCodeRegister();
     DetectKrb5MsgTypeRegister();
     DetectKrb5SNameRegister();
-    DetectKrb5TicketEncryptionRegister();
     DetectSipMethodRegister();
     DetectSipUriRegister();
+    DetectSipProtocolRegister();
+    DetectSipStatCodeRegister();
+    DetectSipStatMsgRegister();
+    DetectSipRequestLineRegister();
+    DetectSipResponseLineRegister();
+    DetectRfbSecresultRegister();
+    DetectRfbSectypeRegister();
+    DetectRfbNameRegister();
     DetectTargetRegister();
-    DetectQuicSniRegister();
-    DetectQuicUaRegister();
-    DetectQuicVersionRegister();
-    DetectQuicCyuHashRegister();
-    DetectQuicCyuStringRegister();
-    DetectJa4HashRegister();
-    DetectFtpCommandRegister();
-    DetectFtpCommandDataRegister();
-    DetectFtpCompletionCodeRegister();
-    DetectFtpReplyRegister();
-    DetectFtpModeRegister();
-    DetectFtpReplyReceivedRegister();
+    DetectTemplateRustBufferRegister();
+    DetectSNMPVersionRegister();
+    DetectSNMPCommunityRegister();
+    DetectSNMPPduTypeRegister();
+    DetectMQTTTypeRegister();
+    DetectMQTTFlagsRegister();
+    DetectMQTTQosRegister();
+    DetectMQTTProtocolVersionRegister();
+    DetectMQTTReasonCodeRegister();
+    DetectMQTTConnectFlagsRegister();
+    DetectMQTTConnectClientIDRegister();
+    DetectMQTTConnectUsernameRegister();
+    DetectMQTTConnectPasswordRegister();
+    DetectMQTTConnectWillTopicRegister();
+    DetectMQTTConnectWillMessageRegister();
+    DetectMQTTConnackSessionPresentRegister();
+    DetectMQTTPublishTopicRegister();
+    DetectMQTTPublishMessageRegister();
+    DetectMQTTSubscribeTopicRegister();
+    DetectMQTTUnsubscribeTopicRegister();
 
+    DetectTemplateBufferRegister();
     DetectBypassRegister();
     DetectConfigRegister();
 
     DetectTransformCompressWhitespaceRegister();
     DetectTransformStripWhitespaceRegister();
-    DetectTransformStripPseudoHeadersRegister();
     DetectTransformMd5Register();
     DetectTransformSha1Register();
     DetectTransformSha256Register();
     DetectTransformDotPrefixRegister();
     DetectTransformPcrexformRegister();
     DetectTransformUrlDecodeRegister();
-    DetectTransformXorRegister();
-    DetectTransformToLowerRegister();
-    DetectTransformToUpperRegister();
-    DetectTransformHeaderLowercaseRegister();
-    DetectTransformFromBase64DecodeRegister();
-    SCDetectTransformDomainRegister();
-    DetectTransformLuaxformRegister();
-
-    DetectFileHandlerRegister();
-
-    DetectVlanIdRegister();
-    DetectVlanLayersRegister();
-
-    DetectEmailRegister();
-
-    SCDetectSMTPRegister();
-    SCDetectDHCPRegister();
-    SCDetectWebsocketRegister();
-    SCDetectEnipRegister();
-    SCDetectMqttRegister();
-    SCDetectRfbRegister();
-    SCDetectSipRegister();
-    SCDetectTemplateRegister();
-    SCDetectLdapRegister();
-    SCDetectSdpRegister();
-    SCDetectDNSRegister();
-    SCDetectPgsqlRegister();
-
-    for (size_t i = 0; i < preregistered_callbacks_nb; i++) {
-        PreregisteredCallbacks[i]();
-    }
 
     /* close keyword registration */
     DetectBufferTypeCloseRegistration();
@@ -797,9 +656,8 @@ void SigTableRegisterTests(void)
                    "registration function.", sigmatch_table[i].name);
 
             if (coverage_unittests)
-                SCLogWarning("detection plugin %s has no unittest "
-                             "registration function.",
-                        sigmatch_table[i].name);
+                SCLogWarning(SC_WARN_NO_UNITTESTS, "detection plugin %s has no unittest "
+                        "registration function.", sigmatch_table[i].name);
         }
     }
 }

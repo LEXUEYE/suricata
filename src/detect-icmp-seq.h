@@ -21,8 +21,8 @@
  * \author Breno Silva <breno.silva@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_ICMP_SEQ_H
-#define SURICATA_DETECT_ICMP_SEQ_H
+#ifndef __DETECT_ICMP_SEQ_H__
+#define __DETECT_ICMP_SEQ_H__
 
 typedef struct DetectIcmpSeqData_ {
     uint16_t seq; /**< sequence value in network byte order */
@@ -31,4 +31,5 @@ typedef struct DetectIcmpSeqData_ {
 /* prototypes */
 void DetectIcmpSeqRegister(void);
 
-#endif /* SURICATA_DETECT_ICMP_SEQ_H */
+#endif /* __DETECT_ICMP_SEQ__ */
+

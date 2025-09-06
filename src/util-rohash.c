@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2024 Open Information Security Foundation
+/* Copyright (C) 2007-2012 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -39,8 +39,8 @@
 #include "util-unittest.h"
 #include "util-memcmp.h"
 #include "util-hash-lookup3.h"
+#include "queue.h"
 #include "util-rohash.h"
-#include "util-debug.h"
 
 /** item_size data beyond this header */
 typedef struct ROHashTableItem_ {
@@ -64,21 +64,22 @@ typedef struct ROHashTableOffsets_ {
 ROHashTable *ROHashInit(uint8_t hash_bits, uint16_t item_size)
 {
     if (item_size % 4 != 0 || item_size == 0) {
-        SCLogError("data size must be multiple of 4");
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "data size must be multiple of 4");
         return NULL;
     }
     if (hash_bits < 4 || hash_bits > 31) {
-        SCLogError("invalid hash_bits setting, valid range is 4-31");
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "invalid hash_bits setting, valid range is 4-31");
         return NULL;
     }
 
     uint32_t size = hashsize(hash_bits) * sizeof(ROHashTableOffsets);
 
-    ROHashTable *table = SCCalloc(1, sizeof(ROHashTable) + size);
+    ROHashTable *table = SCMalloc(sizeof(ROHashTable) + size);
     if (unlikely(table == NULL)) {
-        SCLogError("failed to alloc memory");
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "failed to alloc memory");
         return NULL;
     }
+    memset(table, 0, sizeof(ROHashTable) + size);
 
     table->items = 0;
     table->item_size = item_size;
@@ -101,9 +102,8 @@ void ROHashFree(ROHashTable *table)
 
 uint32_t ROHashMemorySize(ROHashTable *table)
 {
-    uint32_t r1 = hashsize(table->hash_bits) * sizeof(ROHashTableOffsets);
-    uint32_t r2 = table->items * table->item_size;
-    return (uint32_t)(r1 + r2 + sizeof(ROHashTable));
+    return (uint32_t)(hashsize(table->hash_bits) * sizeof(ROHashTableOffsets) +
+            table->items * table->item_size + sizeof(ROHashTable));
 }
 
 /**
@@ -116,18 +116,19 @@ void *ROHashLookup(ROHashTable *table, void *data, uint16_t size)
         SCReturnPtr(NULL, "void");
     }
 
-    const uint32_t hash = hashword(data, table->item_size / 4, 0) & hashmask(table->hash_bits);
+    uint32_t hash = hashword(data, table->item_size/4, 0) & hashmask(table->hash_bits);
 
     /* get offsets start */
-    const ROHashTableOffsets *os = (ROHashTableOffsets *)((uint8_t *)table + sizeof(ROHashTable));
-    const ROHashTableOffsets *o = &os[hash];
+    ROHashTableOffsets *os = (void *)table + sizeof(ROHashTable);
+    ROHashTableOffsets *o = &os[hash];
 
     /* no matches */
     if (o->cnt == 0) {
         SCReturnPtr(NULL, "void");
     }
 
-    for (uint32_t u = 0; u < o->cnt; u++) {
+    uint32_t u;
+    for (u = 0; u < o->cnt; u++) {
         uint32_t offset = (o->offset + u) * table->item_size;
 
         if (SCMemcmp(table->data + offset, data, table->item_size) == 0) {
@@ -151,16 +152,17 @@ void *ROHashLookup(ROHashTable *table, void *data, uint16_t size)
 int ROHashInitQueueValue(ROHashTable *table, void *value, uint16_t size)
 {
     if (table->locked) {
-        SCLogError("can't add value to locked table");
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "can't add value to locked table");
         return 0;
     }
     if (table->item_size != size) {
-        SCLogError("wrong size for data %u != %u", size, table->item_size);
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "wrong size for data %u != %u", size, table->item_size);
         return 0;
     }
 
-    ROHashTableItem *item = SCCalloc(1, sizeof(ROHashTableItem) + table->item_size);
+    ROHashTableItem *item = SCMalloc(sizeof(ROHashTableItem) + table->item_size);
     if (item != NULL) {
+        memset(item, 0x00, sizeof(ROHashTableItem));
         memcpy((void *)item + sizeof(ROHashTableItem), value, table->item_size);
         TAILQ_INSERT_TAIL(&table->head, item, next);
         return 1;
@@ -181,18 +183,16 @@ int ROHashInitQueueValue(ROHashTable *table, void *value, uint16_t size)
 int ROHashInitFinalize(ROHashTable *table)
 {
     if (table->locked) {
-        SCLogError("table already locked");
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "table already locked");
         return 0;
     }
 
     ROHashTableItem *item = NULL;
-    ROHashTableOffsets *os = (ROHashTableOffsets *)((uint8_t *)table + sizeof(ROHashTable));
+    ROHashTableOffsets *os = (void *)table + sizeof(ROHashTable);
 
     /* count items per hash value */
     TAILQ_FOREACH(item, &table->head, next) {
-        uint32_t hash =
-                hashword((uint32_t *)((uint8_t *)item + sizeof(*item)), table->item_size / 4, 0) &
-                hashmask(table->hash_bits);
+        uint32_t hash = hashword((void *)item + sizeof(*item), table->item_size/4, 0) & hashmask(table->hash_bits);
         ROHashTableOffsets *o = &os[hash];
 
         item->pos = o->cnt;
@@ -201,21 +201,23 @@ int ROHashInitFinalize(ROHashTable *table)
     }
 
     if (table->items == 0) {
-        SCLogError("no items");
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "no items");
         return 0;
     }
 
     /* get the data block */
     uint32_t newsize = table->items * table->item_size;
-    table->data = SCCalloc(1, newsize);
+    table->data = SCMalloc(newsize);
     if (table->data == NULL) {
-        SCLogError("failed to alloc memory");
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "failed to alloc memory");
         return 0;
     }
+    memset(table->data, 0x00, newsize);
 
     /* calc offsets into the block per hash value */
     uint32_t total = 0;
-    for (uint32_t x = 0; x < hashsize(table->hash_bits); x++) {
+    uint32_t x;
+    for (x = 0; x < hashsize(table->hash_bits); x++) {
         ROHashTableOffsets *o = &os[x];
 
         if (o->cnt == 0)
@@ -227,14 +229,13 @@ int ROHashInitFinalize(ROHashTable *table)
 
     /* copy each value into the data block */
     TAILQ_FOREACH(item, &table->head, next) {
-        uint32_t hash =
-                hashword((uint32_t *)((uint8_t *)item + sizeof(*item)), table->item_size / 4, 0) &
-                hashmask(table->hash_bits);
+        uint32_t hash = hashword((void *)item + sizeof(*item), table->item_size/4, 0) & hashmask(table->hash_bits);
 
         ROHashTableOffsets *o = &os[hash];
         uint32_t offset = (o->offset + item->pos) * table->item_size;
 
-        memcpy(table->data + offset, (uint8_t *)item + sizeof(*item), table->item_size);
+        memcpy(table->data + offset, (void *)item + sizeof(*item), table->item_size);
+
     }
 
     /* clean up temp items */

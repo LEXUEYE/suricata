@@ -22,14 +22,15 @@
  *
  */
 
-#ifndef SURICATA_UTIL_SPM_BM
-#define SURICATA_UTIL_SPM_BM
+#ifndef __UTIL_SPM_BM__
+#define __UTIL_SPM_BM__
 
 #include "suricata-common.h"
+#include "suricata.h"
 
 #define ALPHABET_SIZE 256
 
-/* Context for boyer moore */
+/* Context for booyer moore */
 typedef struct BmCtx_ {
     uint16_t bmBc[ALPHABET_SIZE];
     //C99 "flexible array member"
@@ -41,12 +42,11 @@ BmCtx *BoyerMooreCtxInit(const uint8_t *needle, uint16_t needle_len);
 BmCtx *BoyerMooreNocaseCtxInit(uint8_t *needle, uint16_t needle_len);
 
 void BoyerMooreCtxToNocase(BmCtx *, uint8_t *, uint16_t);
-uint8_t *BoyerMoore(const uint8_t *x, const uint16_t m, const uint8_t *y, const uint32_t n,
-        const BmCtx *bm_ctx);
-uint8_t *BoyerMooreNocase(const uint8_t *x, const uint16_t m, const uint8_t *y, const uint32_t n,
-        const BmCtx *bm_ctx);
+uint8_t *BoyerMoore(const uint8_t *x, uint16_t m, const uint8_t *y, uint32_t n, BmCtx *bm_ctx);
+uint8_t *BoyerMooreNocase(const uint8_t *x, uint16_t m, const uint8_t *y, uint32_t n, BmCtx *bm_ctx);
 void BoyerMooreCtxDeInit(BmCtx *);
 
 void SpmBMRegister(void);
 
-#endif /* SURICATA_UTIL_SPM_BM */
+#endif /* __UTIL_SPM_BM__ */
+

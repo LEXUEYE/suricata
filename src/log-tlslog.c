@@ -27,20 +27,30 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
+#include "detect.h"
+#include "pkt-var.h"
 #include "conf.h"
 
+#include "threads.h"
 #include "threadvars.h"
+#include "tm-threads.h"
 
 #include "util-print.h"
+#include "util-unittest.h"
+
 #include "util-debug.h"
 
 #include "output.h"
 #include "log-tlslog.h"
 #include "app-layer-ssl.h"
+#include "app-layer.h"
 #include "app-layer-parser.h"
+#include "util-privs.h"
 #include "util-buffer.h"
 
 #include "util-logopenfile.h"
+#include "util-crypt.h"
 #include "util-time.h"
 #include "log-cf-common.h"
 
@@ -50,7 +60,8 @@
 
 #define PRINT_BUF_LEN 46
 
-#define OUTPUT_BUFFER_SIZE 65535
+#define OUTPUT_BUFFER_SIZE   65535
+#define CERT_ENC_BUFFER_SIZE 2048
 
 #define LOG_TLS_DEFAULT  0
 #define LOG_TLS_EXTENDED 1
@@ -75,11 +86,17 @@ typedef struct LogTlsFileCtx_ {
 
 typedef struct LogTlsLogThread_ {
     LogTlsFileCtx *tlslog_ctx;
+
+    /* LogTlsFileCtx has the pointer to the file and a mutex to allow
+       multithreading. */
+    uint32_t tls_cnt;
+
     MemBuffer *buffer;
 } LogTlsLogThread;
 
-int TLSGetIPInformations(const Packet *p, char *srcip, socklen_t srcip_len, Port *sp, char *dstip,
-        socklen_t dstip_len, Port *dp, int ipproto)
+int TLSGetIPInformations(const Packet *p, char* srcip, size_t srcip_len,
+                         Port* sp, char* dstip, size_t dstip_len, Port* dp,
+                         int ipproto)
 {
     if ((PKT_IS_TOSERVER(p))) {
         switch (ipproto) {
@@ -126,9 +143,11 @@ int TLSGetIPInformations(const Packet *p, char *srcip, socklen_t srcip_len, Port
 static TmEcode LogTlsLogThreadInit(ThreadVars *t, const void *initdata,
                                    void **data)
 {
-    LogTlsLogThread *aft = SCCalloc(1, sizeof(LogTlsLogThread));
+    LogTlsLogThread *aft = SCMalloc(sizeof(LogTlsLogThread));
     if (unlikely(aft == NULL))
         return TM_ECODE_FAILED;
+
+    memset(aft, 0, sizeof(LogTlsLogThread));
 
     if (initdata == NULL) {
         SCLogDebug("Error getting context for TLSLog. \"initdata\" argument NULL");
@@ -172,19 +191,27 @@ static void LogTlsLogDeInitCtx(OutputCtx *output_ctx)
     SCFree(output_ctx);
 }
 
+static void LogTlsLogExitPrintStats(ThreadVars *tv, void *data)
+{
+    LogTlsLogThread *aft = (LogTlsLogThread *)data;
+    if (aft == NULL) {
+        return;
+    }
+
+    SCLogInfo("TLS logger logged %" PRIu32 " requests", aft->tls_cnt);
+}
+
 /** \brief Create a new tls log LogFileCtx.
  *  \param conf Pointer to ConfNode containing this loggers configuration.
  *  \return NULL if failure, LogFileCtx* to the file_ctx if succesful
  * */
-static OutputInitResult LogTlsLogInitCtx(SCConfNode *conf)
+static OutputInitResult LogTlsLogInitCtx(ConfNode *conf)
 {
-    SCLogWarning("The tls-log output has been deprecated and will be removed in Suricata 9.0.");
-
     OutputInitResult result = { NULL, false };
     LogFileCtx* file_ctx = LogFileNewCtx();
 
     if (file_ctx == NULL) {
-        SCLogError("LogTlsLogInitCtx: Couldn't "
+        SCLogError(SC_ERR_TLS_LOG_GENERIC, "LogTlsLogInitCtx: Couldn't "
                    "create new file_ctx");
         return result;
     }
@@ -199,12 +226,12 @@ static OutputInitResult LogTlsLogInitCtx(SCConfNode *conf)
     }
     tlslog_ctx->file_ctx = file_ctx;
 
-    const char *extended = SCConfNodeLookupChildValue(conf, "extended");
-    const char *custom = SCConfNodeLookupChildValue(conf, "custom");
-    const char *customformat = SCConfNodeLookupChildValue(conf, "customformat");
+    const char *extended = ConfNodeLookupChildValue(conf, "extended");
+    const char *custom = ConfNodeLookupChildValue(conf, "custom");
+    const char *customformat = ConfNodeLookupChildValue(conf, "customformat");
 
     /* If custom logging format is selected, lets parse it */
-    if (custom != NULL && customformat != NULL && SCConfValIsTrue(custom)) {
+    if (custom != NULL && customformat != NULL && ConfValIsTrue(custom)) {
         tlslog_ctx->cf = LogCustomFormatAlloc();
         if (!tlslog_ctx->cf) {
             goto tlslog_error;
@@ -219,14 +246,15 @@ static OutputInitResult LogTlsLogInitCtx(SCConfNode *conf)
         if (extended == NULL) {
             tlslog_ctx->flags |= LOG_TLS_DEFAULT;
         } else {
-            if (SCConfValIsTrue(extended)) {
+            if (ConfValIsTrue(extended)) {
                 tlslog_ctx->flags |= LOG_TLS_EXTENDED;
             }
         }
     }
 
-    const char *resumption = SCConfNodeLookupChildValue(conf, "session-resumption");
-    if (resumption == NULL || SCConfValIsTrue(resumption)) {
+    const char *resumption = ConfNodeLookupChildValue(conf,
+                                                      "session-resumption");
+    if (resumption == NULL || ConfValIsTrue(resumption)) {
         tlslog_ctx->flags |= LOG_TLS_SESSION_RESUMPTION;
     }
 
@@ -240,14 +268,14 @@ static OutputInitResult LogTlsLogInitCtx(SCConfNode *conf)
     SCLogDebug("TLS log output initialized");
 
     /* Enable the logger for the app layer */
-    SCAppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_TLS);
+    AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_TLS);
 
     result.ctx = output_ctx;
     result.ok = true;
     return result;
 
 parser_error:
-    SCLogError("Syntax error in custom tls log "
+    SCLogError(SC_ERR_INVALID_ARGUMENT, "Syntax error in custom tls log "
                "format string.");
 tlslog_error:
     LogCustomFormatFree(tlslog_ctx->cf);
@@ -264,12 +292,14 @@ static void LogTlsLogVersion(MemBuffer *buffer, uint16_t version)
     MemBufferWriteString(buffer, "VERSION='%s'", ssl_version);
 }
 
-static void LogTlsLogDate(MemBuffer *buffer, const char *title, int64_t *date)
+static void LogTlsLogDate(MemBuffer *buffer, const char *title, time_t *date)
 {
     char timebuf[64] = {0};
-    if (sc_x509_format_timestamp(*date, timebuf, sizeof(timebuf))) {
-        MemBufferWriteString(buffer, "%s='%s'", title, timebuf);
-    }
+    struct timeval tv;
+    tv.tv_sec = *date;
+    tv.tv_usec = 0;
+    CreateUtcIsoTimeString(&tv, timebuf, sizeof(timebuf));
+    MemBufferWriteString(buffer, "%s='%s'", title, timebuf);
 }
 
 static void LogTlsLogString(MemBuffer *buffer, const char *title,
@@ -278,8 +308,9 @@ static void LogTlsLogString(MemBuffer *buffer, const char *title,
     MemBufferWriteString(buffer, "%s='%s'", title, value);
 }
 
-static void LogTlsLogBasic(LogTlsLogThread *aft, SSLState *ssl_state, const SCTime_t ts,
-        char *srcip, Port sp, char *dstip, Port dp)
+static void LogTlsLogBasic(LogTlsLogThread *aft, SSLState *ssl_state,
+                           const struct timeval *ts, char *srcip, Port sp,
+                           char *dstip, Port dp)
 {
     char timebuf[64];
     CreateTimeString(ts, timebuf, sizeof(timebuf));
@@ -309,8 +340,9 @@ static void LogTlsLogBasic(LogTlsLogThread *aft, SSLState *ssl_state, const SCTi
     }
 }
 
-static void LogTlsLogExtended(LogTlsLogThread *aft, SSLState *ssl_state, const SCTime_t ts,
-        char *srcip, Port sp, char *dstip, Port dp)
+static void LogTlsLogExtended(LogTlsLogThread *aft, SSLState *ssl_state,
+                              const struct timeval *ts, char *srcip, Port sp,
+                              char *dstip, Port dp)
 {
     if (ssl_state->server_connp.cert0_fingerprint != NULL) {
         LOG_CF_WRITE_SPACE_SEPARATOR(aft->buffer);
@@ -343,8 +375,9 @@ static void LogTlsLogExtended(LogTlsLogThread *aft, SSLState *ssl_state, const S
 }
 
 /* Custom format logging */
-static void LogTlsLogCustom(LogTlsLogThread *aft, SSLState *ssl_state, const SCTime_t ts,
-        char *srcip, Port sp, char *dstip, Port dp)
+static void LogTlsLogCustom(LogTlsLogThread *aft, SSLState *ssl_state,
+                            const struct timeval *ts, char *srcip, Port sp,
+                            char *dstip, Port dp)
 {
     LogTlsFileCtx *tlslog_ctx = aft->tlslog_ctx;
     uint32_t i;
@@ -367,10 +400,12 @@ static void LogTlsLogCustom(LogTlsLogThread *aft, SSLState *ssl_state, const SCT
                 break;
             case LOG_CF_TIMESTAMP_U:
             /* TIMESTAMP USECONDS */
-            snprintf(buf, sizeof(buf), "%06u", (unsigned int)SCTIME_USECS(ts));
-            PrintRawUriBuf((char *)aft->buffer->buffer, &aft->buffer->offset, aft->buffer->size,
-                    (uint8_t *)buf, MIN(strlen(buf), 6));
-            break;
+                snprintf(buf, sizeof(buf), "%06u", (unsigned int) ts->tv_usec);
+                PrintRawUriBuf((char *)aft->buffer->buffer,
+                               &aft->buffer->offset,
+                               aft->buffer->size, (uint8_t *)buf,
+                               MIN(strlen(buf),6));
+                break;
             case LOG_CF_CLIENT_IP:
             /* CLIENT IP ADDRESS */
                 PrintRawUriBuf((char *)aft->buffer->buffer,
@@ -454,7 +489,7 @@ static int LogTlsLogger(ThreadVars *tv, void *thread_data, const Packet *p,
 {
     LogTlsLogThread *aft = (LogTlsLogThread *)thread_data;
     LogTlsFileCtx *hlog = aft->tlslog_ctx;
-    int ipproto = (PacketIsIPv4(p)) ? AF_INET : AF_INET6;
+    int ipproto = (PKT_IS_IPV4(p)) ? AF_INET : AF_INET6;
 
     SSLState *ssl_state = (SSLState *)state;
     if (unlikely(ssl_state == NULL)) {
@@ -480,15 +515,17 @@ static int LogTlsLogger(ThreadVars *tv, void *thread_data, const Packet *p,
     MemBufferReset(aft->buffer);
 
     if (hlog->flags & LOG_TLS_CUSTOM) {
-        LogTlsLogCustom(aft, ssl_state, p->ts, srcip, sp, dstip, dp);
+        LogTlsLogCustom(aft, ssl_state, &p->ts, srcip, sp, dstip, dp);
     } else if (hlog->flags & LOG_TLS_EXTENDED) {
-        LogTlsLogBasic(aft, ssl_state, p->ts, srcip, sp, dstip, dp);
-        LogTlsLogExtended(aft, ssl_state, p->ts, srcip, sp, dstip, dp);
+        LogTlsLogBasic(aft, ssl_state, &p->ts, srcip, sp, dstip, dp);
+        LogTlsLogExtended(aft, ssl_state, &p->ts, srcip, sp, dstip, dp);
     } else {
-        LogTlsLogBasic(aft, ssl_state, p->ts, srcip, sp, dstip, dp);
+        LogTlsLogBasic(aft, ssl_state, &p->ts, srcip, sp, dstip, dp);
     }
 
     MemBufferWriteString(aft->buffer, "\n");
+
+    aft->tls_cnt++;
 
     hlog->file_ctx->Write((const char *)MEMBUFFER_BUFFER(aft->buffer),
         MEMBUFFER_OFFSET(aft->buffer), hlog->file_ctx);
@@ -498,7 +535,8 @@ static int LogTlsLogger(ThreadVars *tv, void *thread_data, const Packet *p,
 
 void LogTlsLogRegister(void)
 {
-    OutputRegisterTxModuleWithProgress(LOGGER_TLS, MODULE_NAME, "tls-log", LogTlsLogInitCtx,
-            ALPROTO_TLS, LogTlsLogger, TLS_STATE_CLIENT_HANDSHAKE_DONE,
-            TLS_STATE_SERVER_HANDSHAKE_DONE, LogTlsLogThreadInit, LogTlsLogThreadDeinit);
+    OutputRegisterTxModuleWithProgress(LOGGER_TLS, MODULE_NAME, "tls-log",
+        LogTlsLogInitCtx, ALPROTO_TLS, LogTlsLogger, TLS_HANDSHAKE_DONE,
+        TLS_HANDSHAKE_DONE, LogTlsLogThreadInit, LogTlsLogThreadDeinit,
+        LogTlsLogExitPrintStats);
 }

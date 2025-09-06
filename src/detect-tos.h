@@ -21,8 +21,8 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_TOS_H
-#define SURICATA_DETECT_TOS_H
+#ifndef __DETECT_TOS_H__
+#define __DETECT_TOS_H__
 
 typedef struct DetectTosData_ {
     uint8_t negated;
@@ -31,4 +31,4 @@ typedef struct DetectTosData_ {
 
 void DetectTosRegister(void);
 
-#endif /* SURICATA_DETECT_TOS_H */
+#endif /* __DETECT_TOS_H__ */

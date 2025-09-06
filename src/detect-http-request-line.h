@@ -21,9 +21,9 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_HTTP_REQUEST_LINE_H
-#define SURICATA_DETECT_HTTP_REQUEST_LINE_H
+#ifndef __DETECT_HTTP_REQUEST_LINE_H__
+#define __DETECT_HTTP_REQUEST_LINE_H__
 
 void DetectHttpRequestLineRegister(void);
 
-#endif /* SURICATA_DETECT_HTTP_REQUEST_LINE_H */
+#endif /* __DETECT_HTTP_REQUEST_LINE_H__ */

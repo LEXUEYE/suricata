@@ -20,13 +20,14 @@
  *  \author Eric Leblond <eric@regit.org>
  */
 
-#ifndef SURICATA_RUNMODE_AF_PACKET_H
-#define SURICATA_RUNMODE_AF_PACKET_H
+#ifndef __RUNMODE_AF_PACKET_H__
+#define __RUNMODE_AF_PACKET_H__
 
 int RunModeIdsAFPSingle(void);
 int RunModeIdsAFPAutoFp(void);
 int RunModeIdsAFPWorkers(void);
 void RunModeIdsAFPRegister(void);
 const char *RunModeAFPGetDefaultMode(void);
+int AFPRunModeIsIPS(void);
 
-#endif /* SURICATA_RUNMODE_AF_PACKET_H */
+#endif /* __RUNMODE_AF_PACKET_H__ */

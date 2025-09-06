@@ -21,10 +21,10 @@
  * \author Mats Klepsland <mats.klepsland@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_TLS_CERT_FINGERPRINT_H
-#define SURICATA_DETECT_TLS_CERT_FINGERPRINT_H
+#ifndef __DETECT_TLS_CERT_FINGERPRINT_H__
+#define __DETECT_TLS_CERT_FINGERPRINT_H__
 
 /* prototypes */
 void DetectTlsFingerprintRegister(void);
 
-#endif /* SURICATA_DETECT_TLS_CERT_FINGERPRINT_H */
+#endif /* __DETECT_TLS_CERT_FINGERPRINT_H__ */

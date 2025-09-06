@@ -22,9 +22,9 @@
  *
  */
 
-#ifndef SURICATA_OUTPUT_JSON_DROP_H
-#define SURICATA_OUTPUT_JSON_DROP_H
+#ifndef __OUTPUT_JSON_DROP_H__
+#define __OUTPUT_JSON_DROP_H__
 
 void JsonDropLogRegister(void);
 
-#endif /* SURICATA_OUTPUT_JSON_DROP_H */
+#endif /* __OUTPUT_DROPLOG_H__ */

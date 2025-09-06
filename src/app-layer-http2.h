@@ -21,11 +21,11 @@
  * \author Philippe Antoine <p.antoine@catenacyber.fr>
  */
 
-#ifndef SURICATA_APP_LAYER_HTTP2_H
-#define SURICATA_APP_LAYER_HTTP2_H
+#ifndef __APP_LAYER_HTTP2_H__
+#define __APP_LAYER_HTTP2_H__
 
 void RegisterHTTP2Parsers(void);
 
 void HTTP2MimicHttp1Request(void *, void *);
 
-#endif /* SURICATA_APP_LAYER_HTTP2_H */
+#endif /* __APP_LAYER_HTTP2_H__ */

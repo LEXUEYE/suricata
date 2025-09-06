@@ -21,10 +21,11 @@
  * \author Malakhatko Vadym <v.malakhatko@sirinsoftware.com>
  */
 
-#ifndef SURICATA_DETECT_SSH_HASSH_SERVER_H
-#define SURICATA_DETECT_SSH_HASSH_SERVER_H
+#ifndef __DETECT_SSH_HASSH_SERVER_H__
+#define  __DETECT_SSH_HASSH_SERVER_H__
 
 /* prototypes */
 void DetectSshHasshServerRegister (void);
 
-#endif /*  SURICATA_DETECT_SSH_HASSH_SERVER_H */
+#endif /*  __DETECT_SSH_HASSH_SERVER_H__ */
+

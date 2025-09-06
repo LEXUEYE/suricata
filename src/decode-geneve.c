@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2021 Open Information Security Foundation
+/* Copyright (C) 2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -31,12 +31,10 @@
 #include "decode-geneve.h"
 #include "decode-events.h"
 
-#include "detect.h"
 #include "detect-engine-port.h"
 
 #include "flow.h"
 
-#include "util-validate.h"
 #include "util-unittest.h"
 #include "util-debug.h"
 
@@ -52,11 +50,11 @@
 #define GENEVE_RESERVED_FLAGS(hdr_ptr) (hdr_ptr->flags & 0x3F)
 
 #define GENEVE_MIN_HEADER_LEN            sizeof(GeneveHeader)
-#define GENEVE_TOTAL_OPT_LEN(hdr_ptr)    ((uint8_t)((hdr_ptr->ver_plus_len & 0x3F) << 2))
+#define GENEVE_TOTAL_OPT_LEN(hdr_ptr)    ((hdr_ptr->ver_plus_len & 0x3F) << 2)
 #define GENEVE_TOTAL_HEADER_LEN(hdr_ptr) (GENEVE_MIN_HEADER_LEN + GENEVE_TOTAL_OPT_LEN(hdr_ptr))
 
 #define GENEVE_MIN_SINGLE_OPT_LEN         sizeof(GeneveOption)
-#define GENEVE_SINGLE_OPT_LEN(option_ptr) ((uint8_t)((option_ptr->flags_plus_len & 0x1F) << 2))
+#define GENEVE_SINGLE_OPT_LEN(option_ptr) ((option_ptr->flags_plus_len & 0x1F) << 2)
 #define GENEVE_SINGLE_OPT_TOTAL_LEN(option_ptr)                                                    \
     (GENEVE_MIN_SINGLE_OPT_LEN + GENEVE_SINGLE_OPT_LEN(option_ptr))
 
@@ -116,7 +114,8 @@ static void DecodeGeneveConfigPorts(const char *pstr)
     g_geneve_ports_idx = 0;
     for (DetectPort *p = head; p != NULL; p = p->next) {
         if (g_geneve_ports_idx >= GENEVE_MAX_PORTS) {
-            SCLogWarning("more than %d Geneve ports defined", GENEVE_MAX_PORTS);
+            SCLogWarning(SC_ERR_INVALID_YAML_CONF_ENTRY, "more than %d Geneve ports defined",
+                    GENEVE_MAX_PORTS);
             break;
         }
         g_geneve_ports[g_geneve_ports_idx++] = (int)p->port;
@@ -128,7 +127,7 @@ static void DecodeGeneveConfigPorts(const char *pstr)
 void DecodeGeneveConfig(void)
 {
     int enabled = 0;
-    if (SCConfGetBool("decoder.geneve.enabled", &enabled) == 1) {
+    if (ConfGetBool("decoder.geneve.enabled", &enabled) == 1) {
         if (enabled) {
             g_geneve_enabled = true;
         } else {
@@ -137,7 +136,7 @@ void DecodeGeneveConfig(void)
     }
 
     if (g_geneve_enabled) {
-        SCConfNode *node = SCConfGetNode("decoder.geneve.ports");
+        ConfNode *node = ConfGetNode("decoder.geneve.ports");
         if (node && node->val) {
             DecodeGeneveConfigPorts(node->val);
         } else {
@@ -148,12 +147,12 @@ void DecodeGeneveConfig(void)
 
 static inline bool IsValidGeneveVersion(const GeneveHeader *geneve_hdr)
 {
-    const int valid_versions[] = VALID_GENEVE_VERSIONS;
-    const int num_versions = sizeof(valid_versions) / sizeof(int);
+    const int valid_verisons[] = VALID_GENEVE_VERSIONS;
+    const int num_versions = sizeof(valid_verisons) / sizeof(int);
     const uint8_t cur_version = GENEVE_VERSION(geneve_hdr);
 
     for (int i = 0; i < num_versions; i++) {
-        if (valid_versions[i] == cur_version)
+        if (valid_verisons[i] == cur_version)
             return true;
     }
 
@@ -184,8 +183,6 @@ static inline bool IsHeaderLengthConsistentWithOptions(const GeneveHeader *genev
  */
 int DecodeGeneve(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p, const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
     const GeneveHeader *geneve_hdr = (const GeneveHeader *)pkt;
 
     uint16_t eth_type, geneve_hdr_len;
@@ -300,16 +297,17 @@ static int DecodeGeneveTest01(void)
     DecodeGeneveConfigPorts(GENEVE_DEFAULT_PORT_S);
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&dtv, 0, sizeof(DecodeThreadVars));
 
     FlowInitConfig(FLOW_QUIET);
     DecodeUDP(&tv, &dtv, p, raw_geneve, sizeof(raw_geneve));
 
-    FAIL_IF_NOT(PacketIsUDP(p));
+    FAIL_IF(p->udph == NULL);
     FAIL_IF(tv.decode_pq.top == NULL);
 
     Packet *tp = PacketDequeueNoLock(&tv.decode_pq);
-    FAIL_IF_NOT(PacketIsUDP(tp));
+    FAIL_IF(tp->udph == NULL);
     FAIL_IF_NOT(tp->sp == 546);
 
     FlowShutdown();
@@ -342,16 +340,17 @@ static int DecodeGeneveTest02(void)
     DecodeGeneveConfigPorts(GENEVE_DEFAULT_PORT_S);
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&dtv, 0, sizeof(DecodeThreadVars));
 
     FlowInitConfig(FLOW_QUIET);
     DecodeUDP(&tv, &dtv, p, raw_geneve, sizeof(raw_geneve));
 
-    FAIL_IF_NOT(PacketIsUDP(p));
+    FAIL_IF(p->udph == NULL);
     FAIL_IF(tv.decode_pq.top == NULL);
 
     Packet *tp = PacketDequeueNoLock(&tv.decode_pq);
-    FAIL_IF_NOT(PacketIsUDP(tp));
+    FAIL_IF(tp->udph == NULL);
     FAIL_IF_NOT(tp->sp == 53);
 
     FlowShutdown();
@@ -389,16 +388,17 @@ static int DecodeGeneveTest03(void)
     DecodeGeneveConfigPorts(GENEVE_DEFAULT_PORT_S);
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&dtv, 0, sizeof(DecodeThreadVars));
 
     FlowInitConfig(FLOW_QUIET);
     DecodeUDP(&tv, &dtv, p, raw_geneve, sizeof(raw_geneve));
 
-    FAIL_IF_NOT(PacketIsUDP(p));
+    FAIL_IF(p->udph == NULL);
     FAIL_IF(tv.decode_pq.top == NULL);
 
     Packet *tp = PacketDequeueNoLock(&tv.decode_pq);
-    FAIL_IF_NOT(PacketIsUDP(tp));
+    FAIL_IF(tp->udph == NULL);
     FAIL_IF_NOT(tp->sp == 53);
 
     FlowShutdown();
@@ -433,12 +433,13 @@ static int DecodeGeneveTest04(void)
     DecodeGeneveConfigPorts("1"); /* Set Suricata to use a non-default port for Geneve*/
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&dtv, 0, sizeof(DecodeThreadVars));
 
     FlowInitConfig(FLOW_QUIET);
     DecodeUDP(&tv, &dtv, p, raw_geneve, sizeof(raw_geneve));
 
-    FAIL_IF_NOT(PacketIsUDP(p));
+    FAIL_IF(p->udph == NULL);
     FAIL_IF(tv.decode_pq.top != NULL); /* Geneve packet should not have been processed */
 
     DecodeGeneveConfigPorts(GENEVE_DEFAULT_PORT_S); /* Reset Geneve port list for future calls */
@@ -473,12 +474,13 @@ static int DecodeGeneveTest05(void)
     DecodeGeneveConfigPorts(GENEVE_DEFAULT_PORT_S);
 
     memset(&tv, 0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
     memset(&dtv, 0, sizeof(DecodeThreadVars));
 
     FlowInitConfig(FLOW_QUIET);
     DecodeUDP(&tv, &dtv, p, raw_geneve, sizeof(raw_geneve));
 
-    FAIL_IF_NOT(PacketIsUDP(p));
+    FAIL_IF(p->udph == NULL);
     FAIL_IF(tv.decode_pq.top != NULL); /* Geneve packet should not have been processed */
 
     FlowShutdown();

@@ -82,15 +82,9 @@
 
    Register tenant with a particular ID and filename.
 
-.. describe:: reload-tenant <id> [filename]
+.. describe:: reload-tenant <id> <filename>
 
-   Reload a tenant with specified ID. A filename to a tenant yaml can be
-   specified. If it is omitted, the original yaml that was used to load
-   / last reload the tenant is used.
-
-.. describe:: reload-tenants
-
-   Reload all registered tenants by reloading their yaml.
+   Reload a tenant with specified ID and filename.
 
 .. describe:: unregister-tenant <id>
 
@@ -123,7 +117,3 @@
 .. describe:: memcap-list
 
    List all memcap values available.
-
-.. describe:: get-flow-stats-by-id <flow_id>
-
-   Display information for a specific flow using ``flow_id`` values.

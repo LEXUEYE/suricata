@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2012 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -16,16 +16,20 @@
  */
 
 #include "suricata-common.h"
-#include "runmode-pcap.h"
+#include "tm-threads.h"
+#include "conf.h"
 #include "runmodes.h"
+#include "runmode-pcap.h"
 #include "output.h"
+#include "log-httplog.h"
 
-#include "util-conf.h"
 #include "util-debug.h"
 #include "util-time.h"
 #include "util-cpu.h"
-#include "util-device-private.h"
+#include "util-affinity.h"
+#include "util-device.h"
 #include "util-runmodes.h"
+#include "util-atomic.h"
 #include "util-misc.h"
 #include "util-byte.h"
 
@@ -38,16 +42,22 @@ int RunModeIdsPcapWorkers(void);
 
 void RunModeIdsPcapRegister(void)
 {
-    RunModeRegisterNewRunMode(RUNMODE_PCAP_DEV, "single", "Single threaded pcap live mode",
-            RunModeIdsPcapSingle, NULL);
+    RunModeRegisterNewRunMode(RUNMODE_PCAP_DEV, "single",
+                              "Single threaded pcap live mode",
+                              RunModeIdsPcapSingle);
     RunModeRegisterNewRunMode(RUNMODE_PCAP_DEV, "autofp",
-            "Multi-threaded pcap live mode. Packets from each flow are assigned to a consistent "
-            "detection thread",
-            RunModeIdsPcapAutoFp, NULL);
+                              "Multi threaded pcap live mode.  Packets from "
+                              "each flow are assigned to a single detect thread, "
+                              "unlike \"pcap_live_auto\" where packets from "
+                              "the same flow can be processed by any detect "
+                              "thread",
+                              RunModeIdsPcapAutoFp);
     RunModeRegisterNewRunMode(RUNMODE_PCAP_DEV, "workers",
-            "Workers pcap live mode, each thread does all"
-            " tasks from acquisition to logging",
-            RunModeIdsPcapWorkers, NULL);
+                              "Workers pcap live mode, each thread does all"
+                              " tasks from acquisition to logging",
+                              RunModeIdsPcapWorkers);
+
+    return;
 }
 
 static void PcapDerefConfig(void *conf)
@@ -62,9 +72,9 @@ static void PcapDerefConfig(void *conf)
 static void *ParsePcapConfig(const char *iface)
 {
     const char *threadsstr = NULL;
-    SCConfNode *if_root;
-    SCConfNode *if_default = NULL;
-    SCConfNode *pcap_node;
+    ConfNode *if_root;
+    ConfNode *if_default = NULL;
+    ConfNode *pcap_node;
     PcapIfaceConfig *aconf = SCMalloc(sizeof(*aconf));
     const char *tmpbpf;
     const char *tmpctype;
@@ -86,21 +96,20 @@ static void *ParsePcapConfig(const char *iface)
 
     aconf->buffer_size = 0;
     /* If set command line option has precedence over config */
-    if ((SCConfGetInt("pcap.buffer-size", &value)) == 1) {
+    if ((ConfGetInt("pcap.buffer-size", &value)) == 1) {
         if (value >= 0 && value <= INT_MAX) {
             SCLogInfo("Pcap will use %d buffer size", (int)value);
-            aconf->buffer_size = (int)value;
+            aconf->buffer_size = value;
         } else {
-            SCLogWarning("pcap.buffer-size "
-                         "value of %" PRIiMAX " is invalid. Valid range is "
-                         "0-2147483647",
-                    value);
+            SCLogWarning(SC_ERR_INVALID_ARGUMENT, "pcap.buffer-size "
+                    "value of %"PRIiMAX" is invalid. Valid range is "
+                    "0-2147483647", value);
         }
     }
 
     aconf->checksum_mode = CHECKSUM_VALIDATION_AUTO;
     aconf->bpf_filter = NULL;
-    if ((SCConfGet("bpf-filter", &tmpbpf)) == 1) {
+    if ((ConfGet("bpf-filter", &tmpbpf)) == 1) {
         aconf->bpf_filter = tmpbpf;
     }
 
@@ -109,7 +118,7 @@ static void *ParsePcapConfig(const char *iface)
     aconf->threads = 1;
 
     /* Find initial node */
-    pcap_node = SCConfGetNode("pcap");
+    pcap_node = ConfGetNode("pcap");
     if (pcap_node == NULL) {
         SCLogInfo("Unable to find pcap config using default value");
         return aconf;
@@ -132,14 +141,13 @@ static void *ParsePcapConfig(const char *iface)
         if_default = NULL;
     }
 
-    if (SCConfGetChildValueWithDefault(if_root, if_default, "threads", &threadsstr) != 1) {
+    if (ConfGetChildValueWithDefault(if_root, if_default, "threads", &threadsstr) != 1) {
         aconf->threads = 1;
     } else {
         if (threadsstr != NULL) {
             if (StringParseInt32(&aconf->threads, 10, 0, (const char *)threadsstr) < 0) {
-                SCLogWarning("Invalid value for "
-                             "pcap.threads: %s, resetting to 1",
-                        threadsstr);
+                SCLogWarning(SC_ERR_INVALID_VALUE, "Invalid value for "
+                             "pcap.threads: %s, resetting to 1", threadsstr);
                 aconf->threads = 1;
             }
         }
@@ -152,12 +160,14 @@ static void *ParsePcapConfig(const char *iface)
     if (aconf->buffer_size == 0) {
         const char *s_limit = NULL;
         int ret;
-        ret = SCConfGetChildValueWithDefault(if_root, if_default, "buffer-size", &s_limit);
+        ret = ConfGetChildValueWithDefault(if_root, if_default, "buffer-size", &s_limit);
         if (ret == 1 && s_limit) {
             uint64_t bsize = 0;
 
             if (ParseSizeStringU64(s_limit, &bsize) < 0) {
-                SCLogError("Failed to parse pcap buffer size: %s", s_limit);
+                SCLogError(SC_ERR_INVALID_ARGUMENT,
+                    "Failed to parse pcap buffer size: %s",
+                    s_limit);
             } else {
                 /* the string 2gb returns 2147483648 which is 1 to high
                  * for a int. */
@@ -165,8 +175,8 @@ static void *ParsePcapConfig(const char *iface)
                     bsize = (uint64_t)INT_MAX;
 
                 if (bsize > INT_MAX) {
-                    SCLogError("Failed to set pcap buffer size: 2gb max. %" PRIu64 " > %d", bsize,
-                            INT_MAX);
+                    SCLogError(SC_ERR_INVALID_ARGUMENT,
+                            "Failed to set pcap buffer size: 2gb max. %"PRIu64" > %d", bsize, INT_MAX);
                 } else {
                     aconf->buffer_size = (int)bsize;
                 }
@@ -176,7 +186,7 @@ static void *ParsePcapConfig(const char *iface)
 
     if (aconf->bpf_filter == NULL) {
         /* set bpf filter if we have one */
-        if (SCConfGetChildValueWithDefault(if_root, if_default, "bpf-filter", &tmpbpf) != 1) {
+        if (ConfGetChildValueWithDefault(if_root, if_default, "bpf-filter", &tmpbpf) != 1) {
             SCLogDebug("could not get bpf or none specified");
         } else {
             aconf->bpf_filter = tmpbpf;
@@ -185,32 +195,30 @@ static void *ParsePcapConfig(const char *iface)
         SCLogInfo("BPF filter set from command line or via old 'bpf-filter' option.");
     }
 
-    if (SCConfGetChildValueWithDefault(if_root, if_default, "checksum-checks", &tmpctype) == 1) {
+    if (ConfGetChildValueWithDefault(if_root, if_default, "checksum-checks", &tmpctype) == 1) {
         if (strcmp(tmpctype, "auto") == 0) {
             aconf->checksum_mode = CHECKSUM_VALIDATION_AUTO;
-        } else if (SCConfValIsTrue(tmpctype)) {
+        } else if (ConfValIsTrue(tmpctype)) {
             aconf->checksum_mode = CHECKSUM_VALIDATION_ENABLE;
-        } else if (SCConfValIsFalse(tmpctype)) {
+        } else if (ConfValIsFalse(tmpctype)) {
             aconf->checksum_mode = CHECKSUM_VALIDATION_DISABLE;
         } else {
-            SCLogError("Invalid value for checksum-checks for %s", aconf->iface);
+            SCLogError(SC_ERR_INVALID_ARGUMENT, "Invalid value for checksum-checks for %s", aconf->iface);
         }
     }
 
     aconf->promisc = LIBPCAP_PROMISC;
-    if (SCConfGetChildValueBoolWithDefault(if_root, if_default, "promisc", &promisc) != 1) {
+    if (ConfGetChildValueBoolWithDefault(if_root, if_default, "promisc", &promisc) != 1) {
         SCLogDebug("could not get promisc or none specified");
     } else {
         aconf->promisc = promisc;
     }
 
     aconf->snaplen = 0;
-    if (SCConfGetChildValueIntWithDefault(if_root, if_default, "snaplen", &snaplen) != 1) {
+    if (ConfGetChildValueIntWithDefault(if_root, if_default, "snaplen", &snaplen) != 1) {
         SCLogDebug("could not get snaplen or none specified");
-    } else if (snaplen < INT_MIN || snaplen > INT_MAX) {
-        SCLogDebug("snaplen value is not in the accepted range");
     } else {
-        aconf->snaplen = (int)snaplen;
+        aconf->snaplen = snaplen;
     }
 
     return aconf;
@@ -232,9 +240,10 @@ int RunModeIdsPcapSingle(void)
 
     SCEnter();
 
+    RunModeInitialize();
     TimeModeSetLive();
 
-    (void)SCConfGet("pcap.single-pcap-dev", &live_dev);
+    (void)ConfGet("pcap.single-pcap-dev", &live_dev);
 
     ret = RunModeSetLiveCaptureSingle(ParsePcapConfig,
                                     PcapConfigGeThreadsCount,
@@ -242,10 +251,10 @@ int RunModeIdsPcapSingle(void)
                                     "DecodePcap", thread_name_single,
                                     live_dev);
     if (ret != 0) {
-        FatalError("Runmode start failed");
+        FatalError(SC_ERR_FATAL, "Runmode start failed");
     }
 
-    SCLogDebug("RunModeIdsPcapSingle initialised");
+    SCLogInfo("RunModeIdsPcapSingle initialised");
 
     SCReturnInt(0);
 }
@@ -271,17 +280,21 @@ int RunModeIdsPcapAutoFp(void)
     const char *live_dev = NULL;
 
     SCEnter();
+    RunModeInitialize();
     TimeModeSetLive();
 
-    (void)SCConfGet("pcap.single-pcap-dev", &live_dev);
+    (void) ConfGet("pcap.single-pcap-dev", &live_dev);
 
-    ret = RunModeSetLiveCaptureAutoFp(ParsePcapConfig, PcapConfigGeThreadsCount, "ReceivePcap",
-            "DecodePcap", thread_name_autofp, live_dev);
+    ret = RunModeSetLiveCaptureAutoFp(ParsePcapConfig,
+                              PcapConfigGeThreadsCount,
+                              "ReceivePcap",
+                              "DecodePcap", thread_name_autofp,
+                              live_dev);
     if (ret != 0) {
-        FatalError("Runmode start failed");
+        FatalError(SC_ERR_FATAL, "Runmode start failed");
     }
 
-    SCLogDebug("RunModeIdsPcapAutoFp initialised");
+    SCLogInfo("RunModeIdsPcapAutoFp initialised");
 
     SCReturnInt(0);
 }
@@ -298,17 +311,21 @@ int RunModeIdsPcapWorkers(void)
     const char *live_dev = NULL;
     SCEnter();
 
+    RunModeInitialize();
     TimeModeSetLive();
 
-    (void)SCConfGet("pcap.single-pcap-dev", &live_dev);
+    (void) ConfGet("pcap.single-pcap-dev", &live_dev);
 
-    ret = RunModeSetLiveCaptureWorkers(ParsePcapConfig, PcapConfigGeThreadsCount, "ReceivePcap",
-            "DecodePcap", thread_name_workers, live_dev);
+    ret = RunModeSetLiveCaptureWorkers(ParsePcapConfig,
+                                    PcapConfigGeThreadsCount,
+                                    "ReceivePcap",
+                                    "DecodePcap", thread_name_workers,
+                                    live_dev);
     if (ret != 0) {
-        FatalError("Unable to start runmode");
+        FatalError(SC_ERR_FATAL, "Unable to start runmode");
     }
 
-    SCLogDebug("RunModeIdsPcapWorkers initialised");
+    SCLogInfo("RunModeIdsPcapWorkers initialised");
 
     SCReturnInt(0);
 }

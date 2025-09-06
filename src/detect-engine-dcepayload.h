@@ -21,12 +21,12 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_ENGINE_DCEPAYLOAD_H
-#define SURICATA_DETECT_ENGINE_DCEPAYLOAD_H
+#ifndef __DETECT_ENGINE_DCEPAYLOAD_H__
+#define __DETECT_ENGINE_DCEPAYLOAD_H__
 
-// uint8_t DetectEngineInspectDcePayload(DetectEngineCtx *, DetectEngineThreadCtx *,
+//int DetectEngineInspectDcePayload(DetectEngineCtx *, DetectEngineThreadCtx *,
 //        const Signature *, Flow *, uint8_t, void *);
 
 void DcePayloadRegisterTests(void);
 
-#endif /* SURICATA_DETECT_ENGINE_DCEPAYLOAD_H */
+#endif /* __DETECT_ENGINE_DCEPAYLOAD_H__ */

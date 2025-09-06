@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2021 Open Information Security Foundation
+/* Copyright (C) 2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -15,14 +15,15 @@
  * 02110-1301, USA.
  */
 
-#ifndef SURICATA_SURICATA_PLUGIN_H
-#define SURICATA_SURICATA_PLUGIN_H
+#ifndef __SURICATA_PLUGIN_H__
+#define __SURICATA_PLUGIN_H__
+
+#include "autoconf.h"
 
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "queue.h"
-#include "autoconf.h"
+#include "conf.h"
 
 /**
  * The size of the data chunk inside each packet structure a plugin
@@ -30,48 +31,38 @@
  */
 #define PLUGIN_VAR_SIZE 64
 
-// Do not reuse autoconf PACKAGE_VERSION which is a string
-// Defined as major version.minor version (no patch version)
-static const uint64_t SC_API_VERSION = 0x0800;
-#define SC_PACKAGE_VERSION PACKAGE_VERSION
-
 /**
  * Structure to define a Suricata plugin.
  */
 typedef struct SCPlugin_ {
-    // versioning to check suricata/plugin API compatibility
-    uint64_t version;
-    const char *suricata_version;
     const char *name;
-    const char *plugin_version;
     const char *license;
     const char *author;
     void (*Init)(void);
 } SCPlugin;
 
-typedef SCPlugin *(*SCPluginRegisterFunc)(void);
+/**
+ * Structure used to define a file type plugin.
+ *
+ * Currently only used by the Eve output type.
+ */
+typedef struct SCPluginFileType_ {
+    char *name;
+    int (*Open)(ConfNode *conf, void **data);
+    int (*Write)(const char *buffer, int buffer_len, void *ctx);
+    void (*Close)(void *ctx);
+    TAILQ_ENTRY(SCPluginFileType_) entries;
+} SCPluginFileType;
+
+bool SCPluginRegisterFileType(SCPluginFileType *);
 
 typedef struct SCCapturePlugin_ {
     char *name;
     void (*Init)(const char *args, int plugin_slot, int receive_slot, int decode_slot);
-    int (*ThreadInit)(void *ctx, int thread_id, void **thread_ctx);
-    int (*ThreadDeinit)(void *ctx, void *thread_ctx);
     const char *(*GetDefaultMode)(void);
     TAILQ_ENTRY(SCCapturePlugin_) entries;
 } SCCapturePlugin;
 
 int SCPluginRegisterCapture(SCCapturePlugin *);
-
-typedef struct SCAppLayerPlugin_ {
-    const char *name;
-    void (*Register)(void);
-    void (*KeywordsRegister)(void);
-    const char *logname;
-    const char *confname;
-    uint8_t dir;
-    bool (*Logger)(const void *tx, void *jb);
-} SCAppLayerPlugin;
-
-int SCPluginRegisterAppLayer(SCAppLayerPlugin *);
 
 #endif /* __SURICATA_PLUGIN_H */

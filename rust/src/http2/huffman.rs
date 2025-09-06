@@ -15,11 +15,9 @@
  * 02110-1301, USA.
  */
 
-use nom7::bits::streaming::take as take_bits;
-use nom7::branch::alt;
-use nom7::combinator::{complete, map_opt};
-use nom7::error::{make_error, ErrorKind};
-use nom7::{Err, IResult};
+use nom::error::ErrorKind;
+use nom::Err;
+use nom::IResult;
 
 fn http2_huffman_table_len5(n: u32) -> Option<u8> {
     match n {
@@ -37,9 +35,9 @@ fn http2_huffman_table_len5(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len5(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(5u32), http2_huffman_table_len5))(input)
-}
+named!(http2_decode_huffman_len5<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(5u32), http2_huffman_table_len5) )
+);
 
 fn http2_huffman_table_len6(n: u32) -> Option<u8> {
     match n {
@@ -73,9 +71,9 @@ fn http2_huffman_table_len6(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len6(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(6u32), http2_huffman_table_len6))(input)
-}
+named!(http2_decode_huffman_len6<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(6u32), http2_huffman_table_len6))
+);
 
 fn http2_huffman_table_len7(n: u32) -> Option<u8> {
     match n {
@@ -115,9 +113,9 @@ fn http2_huffman_table_len7(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len7(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(7u32), http2_huffman_table_len7))(input)
-}
+named!(http2_decode_huffman_len7<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(7u32), http2_huffman_table_len7))
+);
 
 fn http2_huffman_table_len8(n: u32) -> Option<u8> {
     match n {
@@ -131,9 +129,9 @@ fn http2_huffman_table_len8(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len8(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(8u32), http2_huffman_table_len8))(input)
-}
+named!(http2_decode_huffman_len8<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(8u32), http2_huffman_table_len8))
+);
 
 fn http2_huffman_table_len10(n: u32) -> Option<u8> {
     match n {
@@ -146,9 +144,9 @@ fn http2_huffman_table_len10(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len10(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(10u32), http2_huffman_table_len10))(input)
-}
+named!(http2_decode_huffman_len10<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(10u32), http2_huffman_table_len10))
+);
 
 fn http2_huffman_table_len11(n: u32) -> Option<u8> {
     match n {
@@ -159,9 +157,9 @@ fn http2_huffman_table_len11(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len11(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(11u32), http2_huffman_table_len11))(input)
-}
+named!(http2_decode_huffman_len11<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(11u32), http2_huffman_table_len11))
+);
 
 fn http2_huffman_table_len12(n: u32) -> Option<u8> {
     match n {
@@ -171,9 +169,9 @@ fn http2_huffman_table_len12(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len12(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(12u32), http2_huffman_table_len12))(input)
-}
+named!(http2_decode_huffman_len12<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(12u32), http2_huffman_table_len12))
+);
 
 fn http2_huffman_table_len13(n: u32) -> Option<u8> {
     match n {
@@ -187,9 +185,9 @@ fn http2_huffman_table_len13(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len13(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(13u32), http2_huffman_table_len13))(input)
-}
+named!(http2_decode_huffman_len13<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(13u32), http2_huffman_table_len13))
+);
 
 fn http2_huffman_table_len14(n: u32) -> Option<u8> {
     match n {
@@ -199,9 +197,9 @@ fn http2_huffman_table_len14(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len14(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(14u32), http2_huffman_table_len14))(input)
-}
+named!(http2_decode_huffman_len14<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(14u32), http2_huffman_table_len14))
+);
 
 fn http2_huffman_table_len15(n: u32) -> Option<u8> {
     match n {
@@ -212,9 +210,9 @@ fn http2_huffman_table_len15(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len15(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(15u32), http2_huffman_table_len15))(input)
-}
+named!(http2_decode_huffman_len15<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(15u32), http2_huffman_table_len15))
+);
 
 fn http2_huffman_table_len19(n: u32) -> Option<u8> {
     match n {
@@ -225,9 +223,9 @@ fn http2_huffman_table_len19(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len19(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(19u32), http2_huffman_table_len19))(input)
-}
+named!(http2_decode_huffman_len19<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(19u32), http2_huffman_table_len19))
+);
 
 fn http2_huffman_table_len20(n: u32) -> Option<u8> {
     match n {
@@ -243,9 +241,9 @@ fn http2_huffman_table_len20(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len20(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(20u32), http2_huffman_table_len20))(input)
-}
+named!(http2_decode_huffman_len20<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(20u32), http2_huffman_table_len20))
+);
 
 fn http2_huffman_table_len21(n: u32) -> Option<u8> {
     match n {
@@ -266,9 +264,9 @@ fn http2_huffman_table_len21(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len21(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(21u32), http2_huffman_table_len21))(input)
-}
+named!(http2_decode_huffman_len21<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(21u32), http2_huffman_table_len21))
+);
 
 fn http2_huffman_table_len22(n: u32) -> Option<u8> {
     match n {
@@ -302,9 +300,9 @@ fn http2_huffman_table_len22(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len22(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(22u32), http2_huffman_table_len22))(input)
-}
+named!(http2_decode_huffman_len22<(&[u8], usize), u8>,
+complete!( map_opt!(take_bits!(22u32), http2_huffman_table_len22))
+);
 
 fn http2_huffman_table_len23(n: u32) -> Option<u8> {
     match n {
@@ -341,9 +339,9 @@ fn http2_huffman_table_len23(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len23(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(23u32), http2_huffman_table_len23))(input)
-}
+named!(http2_decode_huffman_len23<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(23u32), http2_huffman_table_len23))
+);
 
 fn http2_huffman_table_len24(n: u32) -> Option<u8> {
     match n {
@@ -363,9 +361,9 @@ fn http2_huffman_table_len24(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len24(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(24u32), http2_huffman_table_len24))(input)
-}
+named!(http2_decode_huffman_len24<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(24u32), http2_huffman_table_len24))
+);
 
 fn http2_huffman_table_len25(n: u32) -> Option<u8> {
     match n {
@@ -377,9 +375,9 @@ fn http2_huffman_table_len25(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len25(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(25u32), http2_huffman_table_len25))(input)
-}
+named!(http2_decode_huffman_len25<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(25u32), http2_huffman_table_len25))
+);
 
 fn http2_huffman_table_len26(n: u32) -> Option<u8> {
     match n {
@@ -402,9 +400,9 @@ fn http2_huffman_table_len26(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len26((i, bit_offset): (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(26u32), http2_huffman_table_len26))((i, bit_offset))
-}
+named!(http2_decode_huffman_len26<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(26u32), http2_huffman_table_len26))
+);
 
 fn http2_huffman_table_len27(n: u32) -> Option<u8> {
     match n {
@@ -431,9 +429,9 @@ fn http2_huffman_table_len27(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len27(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(27u32), http2_huffman_table_len27))(input)
-}
+named!(http2_decode_huffman_len27<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(27u32), http2_huffman_table_len27))
+);
 
 fn http2_huffman_table_len28(n: u32) -> Option<u8> {
     match n {
@@ -470,9 +468,9 @@ fn http2_huffman_table_len28(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len28(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(28u32), http2_huffman_table_len28))(input)
-}
+named!(http2_decode_huffman_len28<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(28u32), http2_huffman_table_len28))
+);
 
 fn http2_huffman_table_len30(n: u32) -> Option<u8> {
     match n {
@@ -484,44 +482,23 @@ fn http2_huffman_table_len30(n: u32) -> Option<u8> {
     }
 }
 
-fn http2_decode_huffman_len30(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    complete(map_opt(take_bits(30u32), http2_huffman_table_len30))(input)
-}
+named!(http2_decode_huffman_len30<(&[u8], usize), u8>,
+    complete!( map_opt!(take_bits!(30u32), http2_huffman_table_len30))
+);
 
 //hack to end many0 even if some bits are remaining
 fn http2_decode_huffman_end(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    return Err(Err::Error(make_error(input, ErrorKind::Eof)));
+    return Err(Err::Error((input, ErrorKind::Eof)));
 }
 
 //we could profile and optimize performance here
-pub fn http2_decode_huffman(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    // trait nom::branch::Alt is implemented for lists up to size 20,
-    // so use nested `alt` as a workaround (see nom documentation for `alt`)
-    alt((
-        http2_decode_huffman_len5,
-        http2_decode_huffman_len6,
-        http2_decode_huffman_len7,
-        http2_decode_huffman_len8,
-        http2_decode_huffman_len10,
-        http2_decode_huffman_len11,
-        http2_decode_huffman_len12,
-        http2_decode_huffman_len13,
-        http2_decode_huffman_len14,
-        http2_decode_huffman_len15,
-        http2_decode_huffman_len19,
-        http2_decode_huffman_len20,
-        http2_decode_huffman_len21,
-        http2_decode_huffman_len21,
-        http2_decode_huffman_len22,
-        http2_decode_huffman_len23,
-        http2_decode_huffman_len24,
-        http2_decode_huffman_len25,
-        http2_decode_huffman_len26,
-        http2_decode_huffman_len27,
-        alt((
-            http2_decode_huffman_len28,
-            http2_decode_huffman_len30,
-            http2_decode_huffman_end,
-        )),
-    ))(input)
-}
+named!(pub http2_decode_huffman<(&[u8], usize), u8>,
+    alt!(http2_decode_huffman_len5 | http2_decode_huffman_len6 | http2_decode_huffman_len7 |
+    http2_decode_huffman_len8 | http2_decode_huffman_len10 | http2_decode_huffman_len11 |
+    http2_decode_huffman_len12 | http2_decode_huffman_len13 | http2_decode_huffman_len14 |
+    http2_decode_huffman_len15 | http2_decode_huffman_len19 | http2_decode_huffman_len20 |
+    http2_decode_huffman_len21 | http2_decode_huffman_len22 | http2_decode_huffman_len23 |
+    http2_decode_huffman_len24 | http2_decode_huffman_len25 | http2_decode_huffman_len26 |
+    http2_decode_huffman_len27 | http2_decode_huffman_len28 | http2_decode_huffman_len30 |
+    http2_decode_huffman_end)
+);

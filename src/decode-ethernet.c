@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2021 Open Information Security Foundation
+/* Copyright (C) 2007-2014 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -35,15 +35,12 @@
 #include "decode-ethernet.h"
 #include "decode-events.h"
 
-#include "util-validate.h"
 #include "util-unittest.h"
 #include "util-debug.h"
 
 int DecodeEthernet(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
                    const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
     StatsIncr(tv, dtv->counter_eth);
 
     if (unlikely(len < ETHERNET_HEADER_LEN)) {
@@ -54,12 +51,14 @@ int DecodeEthernet(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
     if (!PacketIncreaseCheckLayers(p)) {
         return TM_ECODE_FAILED;
     }
-    EthernetHdr *ethh = PacketSetEthernet(p, pkt);
+    p->ethh = (EthernetHdr *)pkt;
+    if (unlikely(p->ethh == NULL))
+        return TM_ECODE_FAILED;
 
-    SCLogDebug("p %p pkt %p ether type %04x", p, pkt, SCNtohs(ethh->eth_type));
+    SCLogDebug("p %p pkt %p ether type %04x", p, pkt, SCNtohs(p->ethh->eth_type));
 
-    DecodeNetworkLayer(tv, dtv, SCNtohs(ethh->eth_type), p, pkt + ETHERNET_HEADER_LEN,
-            len - ETHERNET_HEADER_LEN);
+    DecodeNetworkLayer(tv, dtv, SCNtohs(p->ethh->eth_type), p,
+            pkt + ETHERNET_HEADER_LEN, len - ETHERNET_HEADER_LEN);
 
     return TM_ECODE_OK;
 }
@@ -90,7 +89,7 @@ static int DecodeEthernetTest01 (void)
         0xab, 0xcd, 0xab, 0xcd, 0xab, 0xcd, 0xab, 0xcd,
         0xab, 0xcd };
 
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     if (unlikely(p == NULL))
         return 0;
     ThreadVars tv;
@@ -98,6 +97,7 @@ static int DecodeEthernetTest01 (void)
 
     memset(&dtv, 0, sizeof(DecodeThreadVars));
     memset(&tv,  0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
 
     DecodeEthernet(&tv, &dtv, p, raw_eth, sizeof(raw_eth));
 
@@ -115,13 +115,14 @@ static int DecodeEthernetTestDceTooSmall(void)
         0x94, 0x56, 0x00, 0x01, 0x89, 0x03,
     };
 
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     FAIL_IF_NULL(p);
     ThreadVars tv;
     DecodeThreadVars dtv;
 
     memset(&dtv, 0, sizeof(DecodeThreadVars));
     memset(&tv,  0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
 
     DecodeEthernet(&tv, &dtv, p, raw_eth, sizeof(raw_eth));
 
@@ -150,13 +151,14 @@ static int DecodeEthernetTestDceNextTooSmall(void)
         0x94, 0x56, 0x00, 0x01,
     };
 
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     FAIL_IF_NULL(p);
     ThreadVars tv;
     DecodeThreadVars dtv;
 
     memset(&dtv, 0, sizeof(DecodeThreadVars));
     memset(&tv,  0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
 
     DecodeEthernet(&tv, &dtv, p, raw_eth, sizeof(raw_eth));
 

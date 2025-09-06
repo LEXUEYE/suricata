@@ -22,23 +22,22 @@
  *
  */
 
-#ifndef SURICATA_APP_LAYER_HTP_FILE_H
-#define SURICATA_APP_LAYER_HTP_FILE_H
+#ifndef __APP_LAYER_HTP_FILE_H__
+#define __APP_LAYER_HTP_FILE_H__
 
-#include "app-layer-htp.h"
+typedef struct HtpContentRange_ {
+    int64_t start;
+    int64_t end;
+    int64_t size;
+} HtpContentRange;
 
-int HTPFileOpen(
-        HtpState *, HtpTxUserData *, const uint8_t *, uint16_t, const uint8_t *, uint32_t, uint8_t);
-int HTPFileOpenWithRange(HtpState *, HtpTxUserData *, const uint8_t *, uint16_t, const uint8_t *,
-        uint32_t, const htp_tx_t *, const bstr *rawvalue, HtpTxUserData *htud);
-bool HTPFileCloseHandleRange(const StreamingBufferConfig *sbcfg, FileContainer *, const uint16_t,
-        HttpRangeContainerBlock *, const uint8_t *, uint32_t);
-int HTPFileStoreChunk(HtpTxUserData *, const uint8_t *, uint32_t, uint8_t);
-
-int HTPParseContentRange(const bstr *rawvalue, HTTPContentRange *range);
-int HTPFileClose(HtpTxUserData *tx, const uint8_t *data, uint32_t data_len, uint8_t flags,
-        uint8_t direction);
+int HTPFileOpen(HtpState *, HtpTxUserData *, const uint8_t *, uint16_t, const uint8_t *, uint32_t,
+        uint64_t, uint8_t);
+int HTPParseContentRange(bstr * rawvalue, HtpContentRange *range);
+int HTPFileSetRange(HtpState *, bstr *rawvalue);
+int HTPFileStoreChunk(HtpState *, const uint8_t *, uint32_t, uint8_t);
+int HTPFileClose(HtpState *, const uint8_t *, uint32_t, uint8_t, uint8_t);
 
 void HTPFileParserRegisterTests(void);
 
-#endif /* SURICATA_APP_LAYER_HTP_FILE_H */
+#endif /* __APP_LAYER_HTP_FILE_H__ */

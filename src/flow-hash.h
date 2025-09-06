@@ -21,10 +21,8 @@
  *  \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_FLOW_HASH_H
-#define SURICATA_FLOW_HASH_H
-
-#include "flow.h"
+#ifndef __FLOW_HASH_H__
+#define __FLOW_HASH_H__
 
 /** Spinlocks or Mutex for the flow buckets. */
 //#define FBLOCK_SPIN
@@ -56,9 +54,10 @@ typedef struct FlowBucket_ {
     /** timestamp in seconds of the earliest possible moment a flow
      *  will time out in this row. Set by the flow manager. Cleared
      *  to 0 by workers, either when new flows are added or when a
-     *  flow state changes. The flow manager sets this to UINT_MAX for
+     *  flow state changes. The flow manager sets this to INT_MAX for
      *  empty buckets. */
-    SC_ATOMIC_DECLARE(uint32_t, next_ts);
+    // 下一个流超时时间,当桶内的丢弃数据更新或者流状态更新时置0，使得管理线程立即刷新该桶处理相关数据
+    SC_ATOMIC_DECLARE(int32_t, next_ts);
 } __attribute__((aligned(CLS))) FlowBucket;
 
 #ifdef FBLOCK_SPIN
@@ -79,12 +78,12 @@ typedef struct FlowBucket_ {
 
 /* prototypes */
 
-Flow *FlowGetFlowFromHash(ThreadVars *tv, FlowLookupStruct *tctx, Packet *, Flow **);
+Flow *FlowGetFlowFromHash(ThreadVars *tv, FlowLookupStruct *tctx,
+        const Packet *, Flow **);
 
 Flow *FlowGetFromFlowKey(FlowKey *key, struct timespec *ttime, const uint32_t hash);
-Flow *FlowGetExistingFlowFromFlowId(uint64_t flow_id);
+Flow *FlowGetExistingFlowFromHash(FlowKey * key, uint32_t hash);
 uint32_t FlowKeyGetHash(FlowKey *flow_key);
-uint32_t FlowGetIpPairProtoHash(const Packet *p);
 
 /** \note f->fb must be locked */
 static inline void RemoveFromHash(Flow *f, Flow *prev_f)
@@ -102,4 +101,5 @@ static inline void RemoveFromHash(Flow *f, Flow *prev_f)
     f->fb = NULL;
 }
 
-#endif /* SURICATA_FLOW_HASH_H */
+#endif /* __FLOW_HASH_H__ */
+

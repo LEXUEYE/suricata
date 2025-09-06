@@ -21,9 +21,9 @@
  * \author Giuseppe Longo <giuseppe@glongo.it>
  */
 
-#ifndef SURICATA_DETECT_SIP_URI_H
-#define SURICATA_DETECT_SIP_URI_H
+#ifndef __DETECT_SIP_URI_H__
+#define __DETECT_SIP_URI_H__
 
 void DetectSipUriRegister(void);
 
-#endif /* SURICATA_DETECT_SIP_URI_H */
+#endif /* __DETECT_SIP_URI_H__ */

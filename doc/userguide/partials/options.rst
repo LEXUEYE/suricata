@@ -12,22 +12,6 @@
 
    Path to configuration file.
 
-.. option:: --include <path>
-
-   Additional configuration files to include. Multiple additional
-   configuration files can be provided and will be included in the
-   order specified on the command line.  These additional configuration
-   files are loaded as if they existed at the end of the main
-   configuration file.
-
-   Example including one additional file::
-
-     --include /etc/suricata/other.yaml
-
-   Example including more than one additional file::
-
-     --include /etc/suricata/other.yaml --include /etc/suricata/extra.yaml
-
 .. option:: -T
 
    Test configuration.
@@ -51,23 +35,17 @@
 
 .. Basic input options.
 
-.. _cmdline-option-r:
-
 .. option:: -r <path>
 
    Run in pcap offline mode (replay mode) reading files from pcap file. If
    <path> specifies a directory, all files in that directory will be processed
    in order of modified time maintaining flow state between files.
 
-.. _cmdline-option-pcap-file-continuous:
-
 .. option:: --pcap-file-continuous
 
    Used with the -r option to indicate that the mode should stay alive until
    interrupted. This is useful with directories to add new files and not reset
    flow state between files.
-
-.. _cmdline-option-pcap-file-recursive:
 
 .. option:: --pcap-file-recursive
 
@@ -76,21 +54,12 @@
    This option cannot be combined with --pcap-file-continuous.  Symlinks are
    ignored.
 
-.. _cmdline-option-pcap-file-delete:
-
 .. option:: --pcap-file-delete
 
    Used with the -r option to indicate that the mode should delete pcap files
    after they have been processed. This is useful with pcap-file-continuous to
    continuously feed files to a directory and have them cleaned up when done. If
    this option is not set, pcap files will not be deleted after processing.
-
-.. _cmdline-option-pcap-file-buffer-size:
-
-.. option:: --pcap-file-buffer-size <value>
-
-   Set read buffer size using ``setvbuf`` to speed up pcap reading. Valid values
-   are 4 KiB to 64 MiB. Default value is 128 KiB. Supported on Linux only.
 
 .. option::  -i <interface>
 
@@ -111,12 +80,6 @@
    supplied, the list of devices from the af-packet section in the
    yaml is used.
 
-.. option:: --af-xdp[=<device>]
-
-   Enable capture of packet using AF_XDP on Linux. If no device is
-   supplied, the list of devices from the af-xdp section in the
-   yaml is used.
-
 .. option:: -q <queue id>
 
    Run inline of the NFQUEUE queue ID provided. May be provided
@@ -129,16 +92,10 @@
    With the -s option you can set a file with signatures, which will
    be loaded together with the rules set in the yaml.
 
-   It is possible to use globbing when specifying rules files.
-   For example, ``-s '/path/to/rules/*.rules'``
-
 .. option:: -S <filename.rules>
 
    With the -S option you can set a file with signatures, which will
    be loaded exclusively, regardless of the rules set in the yaml.
-
-   It is possible to use globbing when specifying rules files.
-   For example, ``-S '/path/to/rules/*.rules'``
 
 .. option:: -l <directory>
 
@@ -168,13 +125,9 @@
    For more information about runmodes see :doc:`Runmodes
    </performance/runmodes>` in the user guide.
 
-.. _cmdline-option-F:
-
 .. option:: -F <bpf filter file>
 
    Use BPF filter from file.
-
-.. _cmdline-option-k:
 
 .. option:: -k [all|none]
 
@@ -218,14 +171,6 @@
 .. option:: --disable-detection
 
    Disable the detection engine.
-
-.. option:: --disable-hashing
-
-   Disable support for hash algorithms such as md5, sha1 and sha256.
-
-   By default hashing is enabled. Disabling hashing will also disable some
-   Suricata features such as the filestore, ja3, and rule keywords that use hash
-   algorithms.
 
 .. Information options.
    

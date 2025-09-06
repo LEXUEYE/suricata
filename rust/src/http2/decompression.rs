@@ -15,7 +15,7 @@
 * 02110-1301, USA.
 */
 
-use crate::direction::Direction;
+use crate::core::STREAM_TOCLIENT;
 use brotli;
 use flate2::read::{DeflateDecoder, GzDecoder};
 use std;
@@ -25,13 +25,13 @@ use std::io::{Cursor, Read, Write};
 pub const HTTP2_DECOMPRESSION_CHUNK_SIZE: usize = 0x1000; // 4096
 
 #[repr(u8)]
-#[derive(Copy, Clone, PartialOrd, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialOrd, PartialEq, Debug)]
 pub enum HTTP2ContentEncoding {
-    Unknown = 0,
-    Gzip = 1,
-    Br = 2,
-    Deflate = 3,
-    Unrecognized = 4,
+    HTTP2ContentEncodingUnknown = 0,
+    HTTP2ContentEncodingGzip = 1,
+    HTTP2ContentEncodingBr = 2,
+    HTTP2ContentEncodingDeflate = 3,
+    HTTP2ContentEncodingUnrecognized = 4,
 }
 
 //a cursor turning EOF into blocking errors
@@ -49,11 +49,6 @@ impl HTTP2cursor {
 
     pub fn set_position(&mut self, pos: u64) {
         return self.cursor.set_position(pos);
-    }
-
-    pub fn clear(&mut self) {
-        self.cursor.get_mut().clear();
-        self.cursor.set_position(0);
     }
 }
 
@@ -80,23 +75,19 @@ impl Read for HTTP2cursor {
 }
 
 pub enum HTTP2Decompresser {
-    Unassigned,
-    // Box because large.
-    Gzip(Box<GzDecoder<HTTP2cursor>>),
-    // Box because large.
-    Brotli(Box<brotli::Decompressor<HTTP2cursor>>),
-    // This one is not so large, at 88 bytes as of doing this, but box
-    // for consistency.
-    Deflate(Box<DeflateDecoder<HTTP2cursor>>),
+    UNASSIGNED,
+    GZIP(GzDecoder<HTTP2cursor>),
+    BROTLI(brotli::Decompressor<HTTP2cursor>),
+    DEFLATE(DeflateDecoder<HTTP2cursor>),
 }
 
 impl std::fmt::Debug for HTTP2Decompresser {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            HTTP2Decompresser::Unassigned => write!(f, "UNASSIGNED"),
-            HTTP2Decompresser::Gzip(_) => write!(f, "GZIP"),
-            HTTP2Decompresser::Brotli(_) => write!(f, "BROTLI"),
-            HTTP2Decompresser::Deflate(_) => write!(f, "DEFLATE"),
+            HTTP2Decompresser::UNASSIGNED => write!(f, "UNASSIGNED"),
+            HTTP2Decompresser::GZIP(_) => write!(f, "GZIP"),
+            HTTP2Decompresser::BROTLI(_) => write!(f, "BROTLI"),
+            HTTP2Decompresser::DEFLATE(_) => write!(f, "DEFLATE"),
         }
     }
 }
@@ -161,37 +152,36 @@ fn http2_decompress<'a>(
         }
     }
     //brotli does not consume all input if it reaches some end
-    decoder.get_mut().clear();
+
+    decoder.get_mut().set_position(0);
     return Ok(&output[..offset]);
 }
 
 impl HTTP2DecoderHalf {
     pub fn new() -> HTTP2DecoderHalf {
         HTTP2DecoderHalf {
-            encoding: HTTP2ContentEncoding::Unknown,
-            decoder: HTTP2Decompresser::Unassigned,
+            encoding: HTTP2ContentEncoding::HTTP2ContentEncodingUnknown,
+            decoder: HTTP2Decompresser::UNASSIGNED,
         }
     }
 
-    pub fn http2_encoding_fromvec(&mut self, input: &[u8]) {
+    pub fn http2_encoding_fromvec(&mut self, input: &Vec<u8>) {
         //use first encoding...
-        if self.encoding == HTTP2ContentEncoding::Unknown {
-            if input == b"gzip" {
-                self.encoding = HTTP2ContentEncoding::Gzip;
-                self.decoder =
-                    HTTP2Decompresser::Gzip(Box::new(GzDecoder::new(HTTP2cursor::new())));
-            } else if input == b"deflate" {
-                self.encoding = HTTP2ContentEncoding::Deflate;
-                self.decoder =
-                    HTTP2Decompresser::Deflate(Box::new(DeflateDecoder::new(HTTP2cursor::new())));
-            } else if input == b"br" {
-                self.encoding = HTTP2ContentEncoding::Br;
-                self.decoder = HTTP2Decompresser::Brotli(Box::new(brotli::Decompressor::new(
+        if self.encoding == HTTP2ContentEncoding::HTTP2ContentEncodingUnknown {
+            if *input == "gzip".as_bytes().to_vec() {
+                self.encoding = HTTP2ContentEncoding::HTTP2ContentEncodingGzip;
+                self.decoder = HTTP2Decompresser::GZIP(GzDecoder::new(HTTP2cursor::new()));
+            } else if *input == "deflate".as_bytes().to_vec() {
+                self.encoding = HTTP2ContentEncoding::HTTP2ContentEncodingDeflate;
+                self.decoder = HTTP2Decompresser::DEFLATE(DeflateDecoder::new(HTTP2cursor::new()));
+            } else if *input == "br".as_bytes().to_vec() {
+                self.encoding = HTTP2ContentEncoding::HTTP2ContentEncodingBr;
+                self.decoder = HTTP2Decompresser::BROTLI(brotli::Decompressor::new(
                     HTTP2cursor::new(),
                     HTTP2_DECOMPRESSION_CHUNK_SIZE,
-                )));
+                ));
             } else {
-                self.encoding = HTTP2ContentEncoding::Unrecognized;
+                self.encoding = HTTP2ContentEncoding::HTTP2ContentEncodingUnrecognized;
             }
         }
     }
@@ -200,24 +190,33 @@ impl HTTP2DecoderHalf {
         &mut self, input: &'a [u8], output: &'a mut Vec<u8>,
     ) -> io::Result<&'a [u8]> {
         match self.decoder {
-            HTTP2Decompresser::Gzip(ref mut gzip_decoder) => {
-                let r = http2_decompress(&mut *gzip_decoder.as_mut(), input, output);
-                if r.is_err() {
-                    self.decoder = HTTP2Decompresser::Unassigned;
+            HTTP2Decompresser::GZIP(ref mut gzip_decoder) => {
+                let r = http2_decompress(gzip_decoder, input, output);
+                match r {
+                    Err(_) => {
+                        self.decoder = HTTP2Decompresser::UNASSIGNED;
+                    }
+                    _ => {}
                 }
                 return r;
             }
-            HTTP2Decompresser::Brotli(ref mut br_decoder) => {
-                let r = http2_decompress(&mut *br_decoder.as_mut(), input, output);
-                if r.is_err() {
-                    self.decoder = HTTP2Decompresser::Unassigned;
+            HTTP2Decompresser::BROTLI(ref mut br_decoder) => {
+                let r = http2_decompress(br_decoder, input, output);
+                match r {
+                    Err(_) => {
+                        self.decoder = HTTP2Decompresser::UNASSIGNED;
+                    }
+                    _ => {}
                 }
                 return r;
             }
-            HTTP2Decompresser::Deflate(ref mut df_decoder) => {
-                let r = http2_decompress(&mut *df_decoder.as_mut(), input, output);
-                if r.is_err() {
-                    self.decoder = HTTP2Decompresser::Unassigned;
+            HTTP2Decompresser::DEFLATE(ref mut df_decoder) => {
+                let r = http2_decompress(df_decoder, input, output);
+                match r {
+                    Err(_) => {
+                        self.decoder = HTTP2Decompresser::UNASSIGNED;
+                    }
+                    _ => {}
                 }
                 return r;
             }
@@ -241,8 +240,8 @@ impl HTTP2Decoder {
         }
     }
 
-    pub fn http2_encoding_fromvec(&mut self, input: &[u8], dir: Direction) {
-        if dir == Direction::ToClient {
+    pub fn http2_encoding_fromvec(&mut self, input: &Vec<u8>, dir: u8) {
+        if dir == STREAM_TOCLIENT {
             self.decoder_tc.http2_encoding_fromvec(input);
         } else {
             self.decoder_ts.http2_encoding_fromvec(input);
@@ -250,9 +249,9 @@ impl HTTP2Decoder {
     }
 
     pub fn decompress<'a>(
-        &mut self, input: &'a [u8], output: &'a mut Vec<u8>, dir: Direction,
+        &mut self, input: &'a [u8], output: &'a mut Vec<u8>, dir: u8,
     ) -> io::Result<&'a [u8]> {
-        if dir == Direction::ToClient {
+        if dir == STREAM_TOCLIENT {
             return self.decoder_tc.decompress(input, output);
         } else {
             return self.decoder_ts.decompress(input, output);

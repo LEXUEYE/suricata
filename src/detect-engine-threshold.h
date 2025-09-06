@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2021 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -22,25 +22,32 @@
  *  \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_ENGINE_THRESHOLD_H
-#define SURICATA_DETECT_ENGINE_THRESHOLD_H
+#ifndef __DETECT_ENGINE_THRESHOLD_H__
+#define __DETECT_ENGINE_THRESHOLD_H__
 
 #include "detect.h"
-#include "detect-threshold.h"
+#include "host.h"
+#include "ippair.h"
 
 void ThresholdInit(void);
-void ThresholdDestroy(void);
 
-uint32_t ThresholdsExpire(const SCTime_t ts);
+int ThresholdHostStorageId(void);
+int ThresholdHostHasThreshold(Host *);
+
+int ThresholdIPPairHasThreshold(IPPair *pair);
 
 const DetectThresholdData *SigGetThresholdTypeIter(
         const Signature *, const SigMatchData **, int list);
-int PacketAlertThreshold(const DetectEngineCtx *, DetectEngineThreadCtx *,
-        const DetectThresholdData *, Packet *, const Signature *, PacketAlert *);
+int PacketAlertThreshold(DetectEngineCtx *, DetectEngineThreadCtx *,
+        const DetectThresholdData *, Packet *,
+        const Signature *, PacketAlert *);
 
+void ThresholdHashInit(DetectEngineCtx *);
+void ThresholdHashAllocate(DetectEngineCtx *);
+void ThresholdContextDestroy(DetectEngineCtx *);
+
+int ThresholdHostTimeoutCheck(Host *, struct timeval *);
+int ThresholdIPPairTimeoutCheck(IPPair *, struct timeval *);
 void ThresholdListFree(void *ptr);
-void ThresholdCacheThreadFree(void);
 
-void FlowThresholdVarFree(void *ptr);
-
-#endif /* SURICATA_DETECT_ENGINE_THRESHOLD_H */
+#endif /* __DETECT_ENGINE_THRESHOLD_H__ */

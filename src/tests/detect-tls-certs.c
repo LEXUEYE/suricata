@@ -22,35 +22,34 @@
  *
  */
 
-#include "detect-engine-build.h"
-#include "detect-engine-alert.h"
-#include "app-layer-parser.h"
-
 /**
  * \test Test that a signature containing tls.certs is correctly parsed
- *       and that the keyword is registered.
+ *       and that the keyword is registred.
  */
 static int DetectTlsCertsTest01(void)
 {
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
     FAIL_IF_NULL(de_ctx);
+
     de_ctx->flags |= DE_QUIET;
-    Signature *s = DetectEngineAppendSig(de_ctx, "alert tls any any -> any any "
-                                                 "(msg:\"Testing tls.certs\"; tls.certs; "
-                                                 "content:\"|01 02 03 04 05|\"; sid:1;)");
+    de_ctx->sig_list = SigInit(de_ctx, "alert tls any any -> any any "
+                               "(msg:\"Testing tls.certs\"; tls.certs; "
+                               "content:\"|01 02 03 04 05|\"; sid:1;)");
     FAIL_IF_NULL(de_ctx->sig_list);
 
     /* sm should not be in the MATCH list */
-    SigMatch *sm = s->init_data->smlists[DETECT_SM_LIST_MATCH];
+    SigMatch *sm = de_ctx->sig_list->sm_lists[DETECT_SM_LIST_MATCH];
     FAIL_IF_NOT_NULL(sm);
 
-    sm = DetectBufferGetFirstSigMatch(s, g_tls_certs_buffer_id);
+    sm = de_ctx->sig_list->sm_lists[g_tls_certs_buffer_id];
     FAIL_IF_NULL(sm);
 
     FAIL_IF(sm->type != DETECT_CONTENT);
     FAIL_IF_NOT_NULL(sm->next);
 
+    SigCleanSignatures(de_ctx);
     DetectEngineCtxFree(de_ctx);
+
     PASS;
 }
 
@@ -299,7 +298,7 @@ static int DetectTlsCertsTest02(void)
     p3->flowflags |= FLOW_PKT_ESTABLISHED;
     p3->pcap_cnt = 3;
 
-    StreamTcpInitConfig(true);
+    StreamTcpInitConfig(TRUE);
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
     FAIL_IF_NULL(de_ctx);
@@ -348,7 +347,7 @@ static int DetectTlsCertsTest02(void)
     AppLayerParserThreadCtxFree(alp_tctx);
     DetectEngineThreadCtxDeinit(&tv, det_ctx);
     DetectEngineCtxFree(de_ctx);
-    StreamTcpFreeConfig(true);
+    StreamTcpFreeConfig(TRUE);
     FLOW_DESTROY(&f);
     UTHFreePacket(p1);
     UTHFreePacket(p2);

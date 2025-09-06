@@ -21,19 +21,21 @@
  *  \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_DATASET_H
-#define SURICATA_DETECT_DATASET_H
+#ifndef __DETECT_DATASET_H__
+#define __DETECT_DATASET_H__
 
 #include "datasets.h"
-#include "datasets-context-json.h"
+
+#define DETECT_DATASET_CMD_SET      0
+#define DETECT_DATASET_CMD_UNSET    1
+#define DETECT_DATASET_CMD_ISNOTSET 2
+#define DETECT_DATASET_CMD_ISSET    3
+
+#define DETECT_DATASET_CMD_MAX      4
 
 typedef struct DetectDatasetData_ {
     Dataset *set;
     uint8_t cmd;
-    DatasetFormats format;
-    DataJsonType json;
-    char json_key[SIG_JSON_CONTENT_KEY_LEN];
-    void *id; /* pointer to the triggering signature */
 } DetectDatasetData;
 
 int DetectDatasetBufferMatch(DetectEngineThreadCtx *det_ctx,
@@ -43,4 +45,4 @@ int DetectDatasetBufferMatch(DetectEngineThreadCtx *det_ctx,
 /* prototypes */
 void DetectDatasetRegister (void);
 
-#endif /* SURICATA_DETECT_DATASET_H */
+#endif /* __DETECT_DATASET_H__ */

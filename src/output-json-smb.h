@@ -21,10 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_OUTPUT_JSON_SMB_H
-#define SURICATA_OUTPUT_JSON_SMB_H
+#ifndef __OUTPUT_JSON_SMB_H__
+#define __OUTPUT_JSON_SMB_H__
 
 void JsonSMBLogRegister(void);
-bool EveSMBAddMetadata(const Flow *f, uint64_t tx_id, SCJsonBuilder *jb);
+bool EveSMBAddMetadata(const Flow *f, uint64_t tx_id, JsonBuilder *jb);
 
-#endif /* SURICATA_OUTPUT_JSON_SMB_H */
+#endif /* __OUTPUT_JSON_SMB_H__ */

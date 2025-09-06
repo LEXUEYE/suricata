@@ -21,8 +21,8 @@
  * \author Clément Galland <clement.galland@epita.fr>
  */
 
-#ifndef SURICATA_APP_LAYER_TFTP_H
-#define SURICATA_APP_LAYER_TFTP_H
+#ifndef __APP_LAYER_TFTP_H__
+#define __APP_LAYER_TFTP_H__
 
 void RegisterTFTPParsers(void);
 
@@ -30,4 +30,4 @@ void RegisterTFTPParsers(void);
 typedef struct TFTPState_ TFTPState;
 typedef struct TFTPTransaction_  TFTPTransaction;
 
-#endif /* SURICATA_APP_LAYER_TFTP_H */
+#endif /* __APP_LAYER_TFTP_H__ */

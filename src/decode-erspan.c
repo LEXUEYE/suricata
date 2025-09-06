@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2021 Open Information Security Foundation
+/* Copyright (C) 2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -36,10 +36,8 @@
 #include "decode-events.h"
 #include "decode-erspan.h"
 
-#include "util-validate.h"
 #include "util-unittest.h"
 #include "util-debug.h"
-#include "conf.h"
 
 /**
  * \brief Functions to decode ERSPAN Type I and II packets
@@ -53,8 +51,9 @@
 void DecodeERSPANConfig(void)
 {
     int enabled = 0;
-    if (SCConfGetBool("decoder.erspan.typeI.enabled", &enabled) == 1) {
-        SCLogWarning("ERSPAN Type I is no longer configurable and it is always"
+    if (ConfGetBool("decoder.erspan.typeI.enabled", &enabled) == 1) {
+        SCLogWarning(SC_WARN_ERSPAN_CONFIG,
+                     "ERSPAN Type I is no longer configurable and it is always"
                      " enabled; ignoring configuration setting.");
     }
 }
@@ -75,8 +74,6 @@ int DecodeERSPANTypeI(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
  */
 int DecodeERSPAN(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p, const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
     StatsIncr(tv, dtv->counter_erspan);
 
     if (len < sizeof(ErspanHdr)) {
@@ -100,7 +97,7 @@ int DecodeERSPAN(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p, const uint8_t
     }
 
     if (vlan_id > 0) {
-        if (p->vlan_idx > VLAN_MAX_LAYER_IDX) {
+        if (p->vlan_idx >= 2) {
             ENGINE_SET_EVENT(p,ERSPAN_TOO_MANY_VLAN_LAYERS);
             return TM_ECODE_FAILED;
         }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2019 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -29,6 +29,7 @@
 #include "util-reference-config.h"
 #include "conf.h"
 #include "util-unittest.h"
+#include "util-error.h"
 #include "util-debug.h"
 #include "util-fmemopen.h"
 
@@ -40,6 +41,9 @@
 /* Default path for the reference.conf file */
 #define SC_RCONF_DEFAULT_FILE_PATH CONFIG_DIR "/reference.config"
 
+static pcre *regex = NULL;
+static pcre_extra *regex_study = NULL;
+
 /* the hash functions */
 uint32_t SCRConfReferenceHashFunc(HashTable *ht, void *data, uint16_t datalen);
 char SCRConfReferenceHashCompareFunc(void *data1, uint16_t datalen1,
@@ -49,35 +53,39 @@ void SCRConfReferenceHashFree(void *ch);
 /* used to get the reference.config file path */
 static const char *SCRConfGetConfFilename(const DetectEngineCtx *de_ctx);
 
-void SCReferenceSCConfInit(DetectEngineCtx *de_ctx)
+void SCReferenceConfInit(void)
 {
-    int en;
-    PCRE2_SIZE eo;
+    const char *eb = NULL;
+    int eo;
     int opts = 0;
 
-    de_ctx->reference_conf_regex =
-            pcre2_compile((PCRE2_SPTR8)SC_RCONF_REGEX, PCRE2_ZERO_TERMINATED, opts, &en, &eo, NULL);
-    if (de_ctx->reference_conf_regex == NULL) {
-        PCRE2_UCHAR errbuffer[256];
-        pcre2_get_error_message(en, errbuffer, sizeof(errbuffer));
-        SCLogWarning("pcre2 compile of \"%s\" failed at "
-                     "offset %d: %s",
-                SC_RCONF_REGEX, (int)eo, errbuffer);
+    regex = pcre_compile(SC_RCONF_REGEX, opts, &eb, &eo, NULL);
+    if (regex == NULL) {
+        SCLogDebug("Compile of \"%s\" failed at offset %" PRId32 ": %s",
+                   SC_RCONF_REGEX, eo, eb);
         return;
     }
-    de_ctx->reference_conf_regex_match =
-            pcre2_match_data_create_from_pattern(de_ctx->reference_conf_regex, NULL);
+
+    regex_study = pcre_study(regex, 0, &eb);
+    if (eb != NULL) {
+        pcre_free(regex);
+        regex = NULL;
+        SCLogDebug("pcre study failed: %s", eb);
+        return;
+    }
+
+    return;
 }
 
-void SCReferenceConfDeinit(DetectEngineCtx *de_ctx)
+void SCReferenceConfDeinit(void)
 {
-    if (de_ctx->reference_conf_regex != NULL) {
-        pcre2_code_free(de_ctx->reference_conf_regex);
-        de_ctx->reference_conf_regex = NULL;
+    if (regex != NULL) {
+        pcre_free(regex);
+        regex = NULL;
     }
-    if (de_ctx->reference_conf_regex_match != NULL) {
-        pcre2_match_data_free(de_ctx->reference_conf_regex_match);
-        de_ctx->reference_conf_regex_match = NULL;
+    if (regex_study != NULL) {
+        pcre_free(regex_study);
+        regex_study = NULL;
     }
 }
 
@@ -104,7 +112,7 @@ static FILE *SCRConfInitContextAndLocalResources(DetectEngineCtx *de_ctx, FILE *
                                               SCRConfReferenceHashCompareFunc,
                                               SCRConfReferenceHashFree);
     if (de_ctx->reference_conf_ht == NULL) {
-        SCLogError("Error initializing the hash "
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "Error initializing the hash "
                    "table");
         return NULL;
     }
@@ -117,11 +125,11 @@ static FILE *SCRConfInitContextAndLocalResources(DetectEngineCtx *de_ctx, FILE *
         const char *filename = SCRConfGetConfFilename(de_ctx);
         if ((fd = fopen(filename, "r")) == NULL) {
 #ifdef UNITTESTS
-            if (RunmodeIsUnittests()) {
+            if (RunmodeIsUnittests())
                 return NULL; // silently fail
-            }
 #endif
-            SCLogError("Error opening file: \"%s\": %s", filename, strerror(errno));
+            SCLogError(SC_ERR_FOPEN, "Error opening file: \"%s\": %s", filename,
+                       strerror(errno));
             return NULL;
         }
     }
@@ -150,13 +158,13 @@ static const char *SCRConfGetConfFilename(const DetectEngineCtx *de_ctx)
 
         /* try loading prefix setting, fall back to global if that
          * fails. */
-        if (SCConfGet(config_value, &path) != 1) {
-            if (SCConfGet("reference-config-file", &path) != 1) {
+        if (ConfGet(config_value, &path) != 1) {
+            if (ConfGet("reference-config-file", &path) != 1) {
                 return (char *)SC_RCONF_DEFAULT_FILE_PATH;
             }
         }
     } else {
-        if (SCConfGet("reference-config-file", &path) != 1) {
+        if (ConfGet("reference-config-file", &path) != 1) {
             return (char *)SC_RCONF_DEFAULT_FILE_PATH;
         }
     }
@@ -166,11 +174,14 @@ static const char *SCRConfGetConfFilename(const DetectEngineCtx *de_ctx)
 /**
  * \brief Releases local resources used by the Reference Config API.
  */
-static void SCRConfDeInitLocalResources(FILE *fd)
+static void SCRConfDeInitLocalResources(DetectEngineCtx *de_ctx, FILE *fd)
 {
     if (fd != NULL) {
         fclose(fd);
+        fd = NULL;
     }
+
+    return;
 }
 
 /**
@@ -182,6 +193,8 @@ void SCRConfDeInitContext(DetectEngineCtx *de_ctx)
         HashTableFree(de_ctx->reference_conf_ht);
 
     de_ctx->reference_conf_ht = NULL;
+
+    return;
 }
 
 /**
@@ -200,7 +213,7 @@ static char *SCRConfStringToLowercase(const char *str)
 
     temp_str = new_str;
     while (*temp_str != '\0') {
-        *temp_str = u8_tolower((unsigned char)*temp_str);
+        *temp_str = tolower((unsigned char)*temp_str);
         temp_str++;
     }
 
@@ -225,31 +238,28 @@ int SCRConfAddReference(DetectEngineCtx *de_ctx, const char *line)
     SCRConfReference *ref_new = NULL;
     SCRConfReference *ref_lookup = NULL;
 
+#define MAX_SUBSTRINGS 30
     int ret = 0;
+    int ov[MAX_SUBSTRINGS];
 
-    ret = pcre2_match(de_ctx->reference_conf_regex, (PCRE2_SPTR8)line, strlen(line), 0, 0,
-            de_ctx->reference_conf_regex_match, NULL);
+    ret = pcre_exec(regex, regex_study, line, strlen(line), 0, 0, ov, 30);
     if (ret < 0) {
-        SCLogError("Invalid Reference Config in "
+        SCLogError(SC_ERR_REFERENCE_CONFIG, "Invalid Reference Config in "
                    "reference.config file");
         goto error;
     }
 
     /* retrieve the reference system */
-    size_t copylen = sizeof(system);
-    ret = pcre2_substring_copy_bynumber(
-            de_ctx->reference_conf_regex_match, 1, (PCRE2_UCHAR8 *)system, &copylen);
+    ret = pcre_copy_substring((char *)line, ov, 30, 1, system, sizeof(system));
     if (ret < 0) {
-        SCLogError("pcre2_substring_copy_bynumber() failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring() failed");
         goto error;
     }
 
     /* retrieve the reference url */
-    copylen = sizeof(url);
-    ret = pcre2_substring_copy_bynumber(
-            de_ctx->reference_conf_regex_match, 2, (PCRE2_UCHAR8 *)url, &copylen);
+    ret = pcre_copy_substring((char *)line, ov, 30, 2, url, sizeof(url));
     if (ret < 0) {
-        SCLogError("pcre2_substring_copy_bynumber() failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring() failed");
         goto error;
     }
 
@@ -312,31 +322,24 @@ static int SCRConfIsLineBlankOrComment(char *line)
  *
  * \param de_ctx Pointer to the Detection Engine Context.
  */
-static bool SCRConfParseFile(DetectEngineCtx *de_ctx, FILE *fd)
+static void SCRConfParseFile(DetectEngineCtx *de_ctx, FILE *fd)
 {
     char line[1024];
-    int runmode = SCRunmodeGet();
-    bool is_conf_test_mode = runmode == RUNMODE_CONF_TEST;
+    uint8_t i = 1;
+
     while (fgets(line, sizeof(line), fd) != NULL) {
         if (SCRConfIsLineBlankOrComment(line))
             continue;
 
-        if (SCRConfAddReference(de_ctx, line) != 0) {
-            if (is_conf_test_mode) {
-                return false;
-            }
-        }
+        SCRConfAddReference(de_ctx, line);
+        i++;
     }
 
 #ifdef UNITTESTS
-    if (de_ctx != NULL && strlen(de_ctx->config_prefix) > 0)
-        SCLogInfo("tenant id %d: Added \"%d\" reference types from the reference.config file",
-                de_ctx->tenant_id, de_ctx->reference_conf_ht->count);
-    else
-        SCLogInfo("Added \"%d\" reference types from the reference.config file",
-                de_ctx->reference_conf_ht->count);
+    SCLogInfo("Added \"%d\" reference types from the reference.config file",
+              de_ctx->reference_conf_ht->count);
 #endif /* UNITTESTS */
-    return true;
+    return;
 }
 
 /**
@@ -354,13 +357,14 @@ SCRConfReference *SCRConfAllocSCRConfReference(const char *system,
     SCRConfReference *ref = NULL;
 
     if (system == NULL) {
-        SCLogError("Invalid arguments.  system NULL");
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "Invalid arguments.  system NULL");
         return NULL;
     }
 
-    if ((ref = SCCalloc(1, sizeof(SCRConfReference))) == NULL) {
+    if ((ref = SCMalloc(sizeof(SCRConfReference))) == NULL) {
         return NULL;
     }
+    memset(ref, 0, sizeof(SCRConfReference));
 
     if ((ref->system = SCRConfStringToLowercase(system)) == NULL) {
         SCFree(ref);
@@ -392,6 +396,8 @@ void SCRConfDeAllocSCRConfReference(SCRConfReference *ref)
 
         SCFree(ref);
     }
+
+    return;
 }
 
 /**
@@ -408,12 +414,12 @@ uint32_t SCRConfReferenceHashFunc(HashTable *ht, void *data, uint16_t datalen)
 {
     SCRConfReference *ref = (SCRConfReference *)data;
     uint32_t hash = 0;
-    size_t i = 0;
+    int i = 0;
 
-    size_t len = strlen(ref->system);
+    int len = strlen(ref->system);
 
     for (i = 0; i < len; i++)
-        hash += u8_tolower((unsigned char)ref->system[i]);
+        hash += tolower((unsigned char)ref->system[i]);
 
     hash = hash % ht->array_size;
 
@@ -438,8 +444,8 @@ char SCRConfReferenceHashCompareFunc(void *data1, uint16_t datalen1,
 {
     SCRConfReference *ref1 = (SCRConfReference *)data1;
     SCRConfReference *ref2 = (SCRConfReference *)data2;
-    size_t len1 = 0;
-    size_t len2 = 0;
+    int len1 = 0;
+    int len2 = 0;
 
     if (ref1 == NULL || ref2 == NULL)
         return 0;
@@ -467,6 +473,8 @@ char SCRConfReferenceHashCompareFunc(void *data1, uint16_t datalen1,
 void SCRConfReferenceHashFree(void *data)
 {
     SCRConfDeAllocSCRConfReference(data);
+
+    return;
 }
 
 /**
@@ -487,23 +495,23 @@ int SCRConfLoadReferenceConfigFile(DetectEngineCtx *de_ctx, FILE *fd)
     fd = SCRConfInitContextAndLocalResources(de_ctx, fd);
     if (fd == NULL) {
 #ifdef UNITTESTS
-        if (RunmodeIsUnittests()) {
+        if (RunmodeIsUnittests() && fd == NULL) {
             return -1;
         }
 #endif
-        SCLogError("please check the \"reference-config-file\" "
-                   "option in your suricata.yaml file");
+        SCLogError(SC_ERR_OPENING_FILE, "please check the \"reference-config-file\" "
+                "option in your suricata.yaml file");
         return -1;
     }
 
-    bool rc = SCRConfParseFile(de_ctx, fd);
-    SCRConfDeInitLocalResources(fd);
+    SCRConfParseFile(de_ctx, fd);
+    SCRConfDeInitLocalResources(de_ctx, fd);
 
-    return rc ? 0 : -1;
+    return 0;
 }
 
 /**
- * \brief Gets the reference config from the corresponding hash table stored
+ * \brief Gets the refernce config from the corresponding hash table stored
  *        in the Detection Engine Context's reference conf ht, given the
  *        reference name.
  *
@@ -555,7 +563,7 @@ FILE *SCRConfGenerateValidDummyReferenceConfigFD01(void)
  * \brief Creates a dummy reference config, with some valid references and a
  *        couple of invalid references, for testing purposes.
  */
-FILE *SCRConfGenerateInvalidDummyReferenceConfigFD02(void)
+FILE *SCRConfGenerateInValidDummyReferenceConfigFD02(void)
 {
     const char *buffer =
         "config reference: one http://www.one.com\n"
@@ -575,7 +583,7 @@ FILE *SCRConfGenerateInvalidDummyReferenceConfigFD02(void)
  * \brief Creates a dummy reference config, with all invalid references, for
  *        testing purposes.
  */
-FILE *SCRConfGenerateInvalidDummyReferenceConfigFD03(void)
+FILE *SCRConfGenerateInValidDummyReferenceConfigFD03(void)
 {
     const char *buffer =
         "config reference one http://www.one.com\n"
@@ -630,7 +638,7 @@ static int SCRConfTest02(void)
     if (de_ctx == NULL)
         return result;
 
-    FILE *fd = SCRConfGenerateInvalidDummyReferenceConfigFD03();
+    FILE *fd = SCRConfGenerateInValidDummyReferenceConfigFD03();
     SCRConfLoadReferenceConfigFile(de_ctx, fd);
 
     if (de_ctx->reference_conf_ht == NULL)
@@ -657,7 +665,7 @@ static int SCRConfTest03(void)
     if (de_ctx == NULL)
         return result;
 
-    FILE *fd = SCRConfGenerateInvalidDummyReferenceConfigFD02();
+    FILE *fd = SCRConfGenerateInValidDummyReferenceConfigFD02();
     SCRConfLoadReferenceConfigFile(de_ctx, fd);
 
     if (de_ctx->reference_conf_ht == NULL)
@@ -715,7 +723,7 @@ static int SCRConfTest05(void)
     if (de_ctx == NULL)
         return 0;
 
-    FILE *fd = SCRConfGenerateInvalidDummyReferenceConfigFD03();
+    FILE *fd = SCRConfGenerateInValidDummyReferenceConfigFD03();
     SCRConfLoadReferenceConfigFile(de_ctx, fd);
 
     if (de_ctx->reference_conf_ht == NULL)
@@ -747,7 +755,7 @@ static int SCRConfTest06(void)
     if (de_ctx == NULL)
         return 0;
 
-    FILE *fd = SCRConfGenerateInvalidDummyReferenceConfigFD02();
+    FILE *fd = SCRConfGenerateInValidDummyReferenceConfigFD02();
     SCRConfLoadReferenceConfigFile(de_ctx, fd);
 
     if (de_ctx->reference_conf_ht == NULL)
@@ -783,4 +791,6 @@ void SCRConfRegisterTests(void)
     UtRegisterTest("SCRConfTest05", SCRConfTest05);
     UtRegisterTest("SCRConfTest06", SCRConfTest06);
 #endif /* UNITTESTS */
+
+    return;
 }

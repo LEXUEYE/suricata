@@ -21,8 +21,8 @@
  * \author Jan Jezek <jjezek@kerio.com>
  */
 
-#ifndef SURICATA_WIN32_MISC_H
-#define SURICATA_WIN32_MISC_H
+#ifndef __WIN32_MISC_H__
+#define __WIN32_MISC_H__
 
 #include <sdkddkver.h>
 

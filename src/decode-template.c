@@ -1,4 +1,4 @@
-/* Copyright (C) 2015-2021 Open Information Security Foundation
+/* Copyright (C) 2015-2018 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -36,8 +36,6 @@
 #include "decode-events.h"
 #include "decode-template.h"
 
-#include "util-validate.h"
-
 /**
  * \brief Function to decode TEMPLATE packets
  * \param tv thread vars
@@ -51,8 +49,6 @@
 int DecodeTEMPLATE(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
                    const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
     /* TODO add counter for your type of packet to DecodeThreadVars,
      * and register it in DecodeRegisterPerfCounters */
     //StatsIncr(tv, dtv->counter_template);
@@ -94,11 +90,8 @@ int DecodeTEMPLATE(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
         }
          */
 
-        if (unlikely(len - hdr_len > USHRT_MAX)) {
-            return TM_ECODE_FAILED;
-        }
         /* invoke the next decoder on the remainder of the data */
-        return DecodeUDP(tv, dtv, p, (uint8_t *)pkt + hdr_len, (uint16_t)(len - hdr_len));
+        return DecodeUDP(tv, dtv, p, (uint8_t *)pkt + hdr_len, len - hdr_len);
     } else {
         //ENGINE_SET_EVENT(p,TEMPLATE_UNSUPPORTED_PROTOCOL);
         return TM_ECODE_FAILED;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2016-2023 Open Information Security Foundation
+/* Copyright (C) 2016 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -24,11 +24,10 @@
  */
 
 #include "suricata-common.h"
+#include "suricata.h"
+
 #include "util-hyperscan.h"
-#include "util-spm.h"
 #include "util-spm-hs.h"
-#include "util-debug.h"
-#include "util-validate.h"
 
 #ifdef BUILD_HYPERSCAN
 
@@ -42,7 +41,7 @@ static int MatchEvent(unsigned int id, unsigned long long from,
                       unsigned long long to, unsigned int flags, void *context)
 {
     uint64_t *match_offset = context;
-    DEBUG_VALIDATE_BUG_ON(*match_offset != UINT64_MAX);
+    BUG_ON(*match_offset != UINT64_MAX);
     *match_offset = to;
     return 1; /* Terminate matching. */
 }
@@ -82,10 +81,9 @@ static int HSBuildDatabase(const uint8_t *needle, uint16_t needle_len,
     hs_error_t err = hs_compile(expr, flags, HS_MODE_BLOCK, NULL, &db,
                                 &compile_err);
     if (err != HS_SUCCESS) {
-        SCLogError("Unable to compile '%s' with Hyperscan, "
-                   "returned %d.",
-                expr, err);
-        return -1;
+        SCLogError(SC_ERR_FATAL, "Unable to compile '%s' with Hyperscan, "
+                                 "returned %d.", expr, err);
+        exit(EXIT_FAILURE);
     }
 
     SCFree(expr);
@@ -96,8 +94,9 @@ static int HSBuildDatabase(const uint8_t *needle, uint16_t needle_len,
     if (err != HS_SUCCESS) {
         /* If scratch allocation failed, this is not recoverable:  other SPM
          * contexts may need this scratch space. */
-        SCLogError("Unable to alloc scratch for Hyperscan, returned %d.", err);
-        return -1;
+        SCLogError(SC_ERR_FATAL,
+                   "Unable to alloc scratch for Hyperscan, returned %d.", err);
+        exit(EXIT_FAILURE);
     }
     global_thread_ctx->ctx = scratch;
     sctx->db = db;
@@ -109,14 +108,15 @@ static int HSBuildDatabase(const uint8_t *needle, uint16_t needle_len,
 static SpmCtx *HSInitCtx(const uint8_t *needle, uint16_t needle_len, int nocase,
                          SpmGlobalThreadCtx *global_thread_ctx)
 {
-    SpmCtx *ctx = SCCalloc(1, sizeof(SpmCtx));
+    SpmCtx *ctx = SCMalloc(sizeof(SpmCtx));
     if (ctx == NULL) {
         SCLogDebug("Unable to alloc SpmCtx.");
         return NULL;
     }
+    memset(ctx, 0, sizeof(SpmCtx));
     ctx->matcher = SPM_HS;
 
-    SpmHsCtx *sctx = SCCalloc(1, sizeof(SpmHsCtx));
+    SpmHsCtx *sctx = SCMalloc(sizeof(SpmHsCtx));
     if (sctx == NULL) {
         SCLogDebug("Unable to alloc SpmHsCtx.");
         SCFree(ctx);
@@ -124,6 +124,7 @@ static SpmCtx *HSInitCtx(const uint8_t *needle, uint16_t needle_len, int nocase,
     }
     ctx->ctx = sctx;
 
+    memset(sctx, 0, sizeof(SpmHsCtx));
     if (HSBuildDatabase(needle, needle_len, nocase, sctx,
                         global_thread_ctx) != 0) {
         SCLogDebug("HSBuildDatabase failed.");
@@ -151,7 +152,7 @@ static uint8_t *HSScan(const SpmCtx *ctx, SpmThreadCtx *thread_ctx,
         /* An error value (other than HS_SCAN_TERMINATED) from hs_scan()
          * indicates that it was passed an invalid database or scratch region,
          * which is not something we can recover from at scan time. */
-        SCLogError("Hyperscan returned fatal error %d.", err);
+        SCLogError(SC_ERR_FATAL, "Hyperscan returned fatal error %d.", err);
         exit(EXIT_FAILURE);
     }
 
@@ -159,7 +160,7 @@ static uint8_t *HSScan(const SpmCtx *ctx, SpmThreadCtx *thread_ctx,
         return NULL;
     }
 
-    DEBUG_VALIDATE_BUG_ON(match_offset < sctx->needle_len);
+    BUG_ON(match_offset < sctx->needle_len);
 
     /* Note: existing API returns non-const ptr */
     return (uint8_t *)haystack + (match_offset - sctx->needle_len);
@@ -167,11 +168,12 @@ static uint8_t *HSScan(const SpmCtx *ctx, SpmThreadCtx *thread_ctx,
 
 static SpmGlobalThreadCtx *HSInitGlobalThreadCtx(void)
 {
-    SpmGlobalThreadCtx *global_thread_ctx = SCCalloc(1, sizeof(SpmGlobalThreadCtx));
+    SpmGlobalThreadCtx *global_thread_ctx = SCMalloc(sizeof(SpmGlobalThreadCtx));
     if (global_thread_ctx == NULL) {
         SCLogDebug("Unable to alloc SpmGlobalThreadCtx.");
         return NULL;
     }
+    memset(global_thread_ctx, 0, sizeof(*global_thread_ctx));
     global_thread_ctx->matcher = SPM_HS;
 
     /* We store scratch in the HS-specific ctx. This will be initialized as
@@ -201,18 +203,20 @@ static void HSDestroyThreadCtx(SpmThreadCtx *thread_ctx)
 
 static SpmThreadCtx *HSMakeThreadCtx(const SpmGlobalThreadCtx *global_thread_ctx)
 {
-    SpmThreadCtx *thread_ctx = SCCalloc(1, sizeof(SpmThreadCtx));
+    SpmThreadCtx *thread_ctx = SCMalloc(sizeof(SpmThreadCtx));
     if (thread_ctx == NULL) {
         SCLogDebug("Unable to alloc SpmThreadCtx.");
         return NULL;
     }
+    memset(thread_ctx, 0, sizeof(*thread_ctx));
     thread_ctx->matcher = SPM_HS;
 
     if (global_thread_ctx->ctx != NULL) {
         hs_scratch_t *scratch = NULL;
         hs_error_t err = hs_clone_scratch(global_thread_ctx->ctx, &scratch);
         if (err != HS_SUCCESS) {
-            SCLogError("Unable to clone scratch (error %d).", err);
+            SCLogError(SC_ERR_FATAL, "Unable to clone scratch (error %d).",
+                       err);
             exit(EXIT_FAILURE);
         }
         thread_ctx->ctx = scratch;

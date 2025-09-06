@@ -21,29 +21,22 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_UTIL_LUA_COMMON_H
-#define SURICATA_UTIL_LUA_COMMON_H
+#ifndef __UTIL_LUA_COMMON_H__
+#define __UTIL_LUA_COMMON_H__
 
-#define DEFAULT_LUA_ALLOC_LIMIT       500000
-#define DEFAULT_LUA_INSTRUCTION_LIMIT 500000
+#ifdef HAVE_LUA
 
 int LuaCallbackError(lua_State *luastate, const char *msg);
 const char *LuaGetStringArgument(lua_State *luastate, int argc);
 
 void LuaPushTableKeyValueInt(lua_State *luastate, const char *key, int value);
-void LuaPushTableKeyValueBoolean(lua_State *luastate, const char *key, bool value);
 void LuaPushTableKeyValueString(lua_State *luastate, const char *key, const char *value);
-void LuaPushTableKeyValueLString(
-        lua_State *luastate, const char *key, const char *value, size_t len);
 void LuaPushTableKeyValueArray(lua_State *luastate, const char *key, const uint8_t *value, size_t len);
+
+int LuaRegisterFunctions(lua_State *luastate);
 
 int LuaStateNeedProto(lua_State *luastate, AppProto alproto);
 
-/* hack to please scan-build. Even though LuaCallbackError *always*
- * returns 2, scan-build doesn't accept it and generates false
- * positives */
-#define LUA_ERROR(msg)                                                                             \
-    LuaCallbackError(luastate, (msg));                                                             \
-    return 2
+#endif /* HAVE_LUA */
 
-#endif /* SURICATA_UTIL_LUA_COMMON_H */
+#endif /* __UTIL_LUA_COMMON_H__ */

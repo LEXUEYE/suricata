@@ -27,7 +27,6 @@
 #include "detect.h"
 #include "detect-parse.h"
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-prefilter.h"
 #include "detect-engine-content-inspection.h"
@@ -67,7 +66,10 @@ void DetectICMPv6hdrRegister(void)
 
     DetectPktMpmRegister("icmpv6.hdr", 2, PrefilterGenericMpmPktRegister, GetData);
 
-    DetectPktInspectEngineRegister("icmpv6.hdr", GetData, DetectEngineInspectPktBufferGeneric);
+    DetectPktInspectEngineRegister("icmpv6.hdr", GetData,
+            DetectEngineInspectPktBufferGeneric);
+
+    return;
 }
 
 /**
@@ -89,7 +91,7 @@ static int DetectICMPv6hdrSetup (DetectEngineCtx *de_ctx, Signature *s, const ch
 
     s->flags |= SIG_FLAG_REQUIRE_PACKET;
 
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_icmpv6hdr_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_icmpv6hdr_buffer_id) < 0)
         return -1;
 
     return 0;
@@ -103,23 +105,24 @@ static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
     InspectionBuffer *buffer = InspectionBufferGet(det_ctx, list_id);
     if (buffer->inspect == NULL) {
         uint32_t hlen = ICMPV6_HEADER_LEN;
-        if (!PacketIsICMPv6(p)) {
+        if (p->icmpv6h == NULL) {
             // DETECT_PROTO_IPV6 does not prefilter
             return NULL;
         }
-        const ICMPV6Hdr *icmpv6h = PacketGetICMPv6(p);
-        if (((uint8_t *)icmpv6h + (ptrdiff_t)hlen) >
-                ((uint8_t *)GET_PKT_DATA(p) + (ptrdiff_t)GET_PKT_LEN(p))) {
-            SCLogDebug("data out of range: %p > %p", ((uint8_t *)icmpv6h + (ptrdiff_t)hlen),
+        if (((uint8_t *)p->icmpv6h + (ptrdiff_t)hlen) >
+                ((uint8_t *)GET_PKT_DATA(p) + (ptrdiff_t)GET_PKT_LEN(p)))
+        {
+            SCLogDebug("data out of range: %p > %p",
+                    ((uint8_t *)p->icmpv6h + (ptrdiff_t)hlen),
                     ((uint8_t *)GET_PKT_DATA(p) + (ptrdiff_t)GET_PKT_LEN(p)));
             SCReturnPtr(NULL, "InspectionBuffer");
         }
 
         const uint32_t data_len = hlen;
-        const uint8_t *data = (const uint8_t *)icmpv6h;
+        const uint8_t *data = (const uint8_t *)p->icmpv6h;
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, data, data_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, data, data_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     SCReturnPtr(buffer, "InspectionBuffer");

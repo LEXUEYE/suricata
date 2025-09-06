@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2023 Open Information Security Foundation
+/* Copyright (C) 2007-2016 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -22,7 +22,6 @@
  */
 
 #include "suricata-common.h"
-#include "rust.h"
 #include "stream-tcp-private.h"
 #include "stream-tcp.h"
 #include "stream-tcp-reassemble.h"
@@ -31,7 +30,6 @@
 #include "util-streaming-buffer.h"
 #include "util-print.h"
 #include "util-validate.h"
-#include "app-layer-frames.h"
 
 static void StreamTcpRemoveSegmentFromStream(TcpStream *stream, TcpSegment *seg);
 
@@ -70,13 +68,14 @@ int TcpSegmentCompare(struct TcpSegment *a, struct TcpSegment *b)
  *  \param data segment data after overlap handling (if any)
  *  \param data_len data length
  *
- *  \return SC_OK on success
- *  \return SC_ENOMEM on error (memory allocation error)
+ *  \return 0 on success
+ *  \return -1 on memory allocation error
+ *  \return negative value on other errors
  */
 static inline int InsertSegmentDataCustom(TcpStream *stream, TcpSegment *seg, uint8_t *data, uint16_t data_len)
 {
     uint64_t stream_offset;
-    uint32_t data_offset;
+    uint16_t data_offset;
 
     if (likely(SEQ_GEQ(seg->seq, stream->base_seq))) {
         stream_offset = STREAM_BASE_OFFSET(stream) + (seg->seq - stream->base_seq);
@@ -91,14 +90,14 @@ static inline int InsertSegmentDataCustom(TcpStream *stream, TcpSegment *seg, ui
                "data_offset %"PRIu16", SEQ %u BASE %u, data_len %u",
                stream, &stream->sb, stream_offset,
                data_offset, seg->seq, stream->base_seq, data_len);
-    DEBUG_VALIDATE_BUG_ON(data_offset > data_len);
-    if (data_len <= data_offset) {
-        SCReturnInt(SC_OK);
+    BUG_ON(data_offset > data_len);
+    if (data_len == data_offset) {
+        SCReturnInt(0);
     }
 
-    int ret = StreamingBufferInsertAt(&stream->sb, &stream_config.sbcnf, &seg->sbseg,
-            data + data_offset, data_len - data_offset, stream_offset);
-    if (ret != SC_OK) {
+    int ret = StreamingBufferInsertAt(
+            &stream->sb, &seg->sbseg, data + data_offset, data_len - data_offset, stream_offset);
+    if (ret != 0) {
         SCReturnInt(ret);
     }
 #ifdef DEBUG
@@ -113,7 +112,7 @@ static inline int InsertSegmentDataCustom(TcpStream *stream, TcpSegment *seg, ui
         //PrintRawDataFp(stdout, mydata, mydata_len);
     }
 #endif
-    SCReturnInt(SC_OK);
+    SCReturnInt(0);
 }
 
 /** \internal
@@ -160,13 +159,18 @@ static inline bool CheckOverlap(struct TCPSEG *tree, TcpSegment *seg)
  *  \retval 2 not inserted, data overlap
  *  \retval 1 inserted with overlap detected
  *  \retval 0 inserted, no overlap
- *  \retval -EINVAL seg out of seq range
+ *  \retval -1 error
  */
 static int DoInsertSegment (TcpStream *stream, TcpSegment *seg, TcpSegment **dup_seg, Packet *p)
 {
-    /* in lossy traffic, we can get here with the wrong sequence numbers */
-    if (SEQ_LEQ(SEG_SEQ_RIGHT_EDGE(seg), stream->base_seq)) {
-        return -EINVAL;
+    /* before our base_seq we don't insert it in our list */
+    if (SEQ_LEQ(SEG_SEQ_RIGHT_EDGE(seg), stream->base_seq))
+    {
+        SCLogDebug("not inserting: SEQ+payload %"PRIu32", last_ack %"PRIu32", "
+                "base_seq %"PRIu32, (seg->seq + TCP_SEG_LEN(seg)),
+                stream->last_ack, stream->base_seq);
+        StreamTcpSetEvent(p, STREAM_REASSEMBLY_SEGMENT_BEFORE_BASE_SEQ);
+        return -1;
     }
 
     /* fast track */
@@ -191,7 +195,7 @@ static int DoInsertSegment (TcpStream *stream, TcpSegment *seg, TcpSegment **dup
             stream->segs_right_edge = SEG_SEQ_RIGHT_EDGE(seg);
 
         /* insert succeeded, now check if we overlap with someone */
-        if (CheckOverlap(&stream->seg_tree, seg)) {
+        if (CheckOverlap(&stream->seg_tree, seg) == true) {
             SCLogDebug("seg %u has overlap in the tree", seg->seq);
             return 1;
         }
@@ -364,17 +368,17 @@ static int DoHandleDataOverlap(TcpStream *stream, const TcpSegment *list,
      * data, we have to update buf with the list data */
     if (data_is_different && !use_new_data) {
         /* we need to copy list into seg */
-        uint32_t list_offset = 0;
-        uint32_t seg_offset = 0;
+        uint16_t list_offset = 0;
+        uint16_t seg_offset = 0;
         uint32_t list_len;
         uint16_t seg_len = p->payload_len;
         uint32_t list_seq = list->seq;
 
         const uint8_t *list_data;
         StreamingBufferSegmentGetData(&stream->sb, &list->sbseg, &list_data, &list_len);
-        DEBUG_VALIDATE_BUG_ON(list_len > USHRT_MAX);
-        if (list_data == NULL || list_len == 0 || list_len > USHRT_MAX)
+        if (list_data == NULL || list_len == 0)
             return 0;
+        BUG_ON(list_len > USHRT_MAX);
 
         /* if list seg is partially before base_seq, list_len (from stream) and
          * TCP_SEG_LEN(list) will not be the same */
@@ -454,9 +458,6 @@ static int DoHandleDataCheckBackwards(TcpStream *stream,
  *
  *  Walk forward from the current segment which is already in the tree.
  *  We walk until the next segs start with a SEQ beyond our right edge.
- *
- *  \retval 1 data was different
- *  \retval 0 data was the same
  */
 static int DoHandleDataCheckForward(TcpStream *stream,
         TcpSegment *seg, uint8_t *buf, Packet *p)
@@ -494,8 +495,7 @@ static int DoHandleDataCheckForward(TcpStream *stream,
 }
 
 /**
- *  \param tree_seg in-tree duplicate of `seg`
- *  \retval res 0 ok, -1 insertion error due to memcap
+ *  \param dup_seg in-tree duplicate of `seg`
  */
 static int DoHandleData(ThreadVars *tv, TcpReassemblyThreadCtx *ra_ctx,
         TcpStream *stream, TcpSegment *seg, TcpSegment *tree_seg, Packet *p)
@@ -544,16 +544,9 @@ static int DoHandleData(ThreadVars *tv, TcpReassemblyThreadCtx *ra_ctx,
     /* insert the temp buffer now that we've (possibly) updated
      * it to account for the overlap policies */
     int res = InsertSegmentDataCustom(stream, handle, buf, p->payload_len);
-    if (res != SC_OK) {
-        if (res == SC_ENOMEM) {
+    if (res < 0) {
+        if (res == -1) {
             StatsIncr(tv, ra_ctx->counter_tcp_segment_memcap);
-            StreamTcpSetEvent(p, STREAM_REASSEMBLY_INSERT_MEMCAP);
-        } else if (res == SC_ELIMIT) {
-            StreamTcpSetEvent(p, STREAM_REASSEMBLY_INSERT_LIMIT);
-        } else if (res == SC_EINVAL) {
-            StreamTcpSetEvent(p, STREAM_REASSEMBLY_INSERT_INVALID);
-        } else {
-            DEBUG_VALIDATE_BUG_ON(1);
         }
         return -1;
     }
@@ -561,78 +554,16 @@ static int DoHandleData(ThreadVars *tv, TcpReassemblyThreadCtx *ra_ctx,
     return 0;
 }
 
-/** \internal
- *  \brief Add the header data to the segment
- *  \param rp packet to take the headers from. Might differ from `pp` in tunnels.
- *  \param pp packet to take the payload size from.
- */
-static void StreamTcpSegmentAddPacketDataDo(TcpSegment *seg, const Packet *rp, const Packet *pp)
-{
-    if (GET_PKT_DATA(rp) != NULL && GET_PKT_LEN(rp) > pp->payload_len) {
-        seg->pcap_hdr_storage->ts = rp->ts;
-        seg->pcap_hdr_storage->pktlen = GET_PKT_LEN(rp) - pp->payload_len;
-        /*
-         * pkt_hdr members are initially allocated 64 bytes of memory. Thus,
-         * need to check that this is sufficient and allocate more memory if
-         * not.
-         */
-        if (seg->pcap_hdr_storage->pktlen > seg->pcap_hdr_storage->alloclen) {
-            uint8_t *tmp_pkt_hdr = StreamTcpReassembleRealloc(seg->pcap_hdr_storage->pkt_hdr,
-                    seg->pcap_hdr_storage->alloclen, seg->pcap_hdr_storage->pktlen);
-            if (tmp_pkt_hdr == NULL) {
-                SCLogDebug("Failed to realloc");
-                seg->pcap_hdr_storage->ts = SCTIME_INITIALIZER;
-                seg->pcap_hdr_storage->pktlen = 0;
-                return;
-            } else {
-                seg->pcap_hdr_storage->pkt_hdr = tmp_pkt_hdr;
-                seg->pcap_hdr_storage->alloclen = GET_PKT_LEN(rp) - pp->payload_len;
-            }
-        }
-        memcpy(seg->pcap_hdr_storage->pkt_hdr, GET_PKT_DATA(rp),
-                (size_t)GET_PKT_LEN(rp) - pp->payload_len);
-    } else {
-        seg->pcap_hdr_storage->ts = SCTIME_INITIALIZER;
-        seg->pcap_hdr_storage->pktlen = 0;
-    }
-}
-
 /**
- * \brief Adds the following information to the TcpSegment from the current
- *  packet being processed: time values, packet length, and the
- *  header data of the packet. This information is added to the TcpSegment so
- *  that it can be used in pcap capturing (log-pcap-stream) to dump the tcp
- *  session at the beginning of the pcap capture.
- * \param seg TcpSegment where information is being stored.
- * \param p Packet being processed.
- * \param tv Thread-specific variables.
- * \param ra_ctx TcpReassembly thread-specific variables
- */
-static void StreamTcpSegmentAddPacketData(
-        TcpSegment *seg, Packet *p, ThreadVars *tv, TcpReassemblyThreadCtx *ra_ctx)
-{
-    if (seg->pcap_hdr_storage == NULL || seg->pcap_hdr_storage->pkt_hdr == NULL) {
-        return;
-    }
-
-    if (PacketIsTunnelChild(p)) {
-        Packet *rp = p->root;
-        StreamTcpSegmentAddPacketDataDo(seg, rp, p);
-    } else {
-        StreamTcpSegmentAddPacketDataDo(seg, p, p);
-    }
-}
-
-/**
- *  \return 0 ok
- *  \return -1 segment not inserted due to memcap issue
+ *  \retval -1 segment not inserted
  *
  *  \param seg segment, this function takes total ownership
  *
  *  In case of error, this function returns the segment to the pool
  */
 int StreamTcpReassembleInsertSegment(ThreadVars *tv, TcpReassemblyThreadCtx *ra_ctx,
-        TcpStream *stream, TcpSegment *seg, Packet *p, uint8_t *pkt_data, uint16_t pkt_datalen)
+        TcpStream *stream, TcpSegment *seg, Packet *p,
+        uint32_t pkt_seq, uint8_t *pkt_data, uint16_t pkt_datalen)
 {
     SCEnter();
 
@@ -640,22 +571,23 @@ int StreamTcpReassembleInsertSegment(ThreadVars *tv, TcpReassemblyThreadCtx *ra_
 
     /* insert segment into list. Note: doesn't handle the data */
     int r = DoInsertSegment (stream, seg, &dup_seg, p);
-
-    if (IsTcpSessionDumpingEnabled()) {
-        StreamTcpSegmentAddPacketData(seg, p, tv, ra_ctx);
+    SCLogDebug("DoInsertSegment returned %d", r);
+    if (r < 0) {
+        StatsIncr(tv, ra_ctx->counter_tcp_reass_list_fail);
+        StreamTcpSegmentReturntoPool(seg);
+        SCReturnInt(-1);
     }
 
     if (likely(r == 0)) {
         /* no overlap, straight data insert */
         int res = InsertSegmentDataCustom(stream, seg, pkt_data, pkt_datalen);
-        if (res != SC_OK) {
+        if (res < 0) {
+            if (res == -1) {
+                StatsIncr(tv, ra_ctx->counter_tcp_segment_memcap);
+            }
             StatsIncr(tv, ra_ctx->counter_tcp_reass_data_normal_fail);
             StreamTcpRemoveSegmentFromStream(stream, seg);
             StreamTcpSegmentReturntoPool(seg);
-            if (res == SC_ENOMEM) {
-                StatsIncr(tv, ra_ctx->counter_tcp_segment_memcap);
-                SCReturnInt(-SC_ENOMEM);
-            }
             SCReturnInt(-1);
         }
 
@@ -700,9 +632,6 @@ int StreamTcpReassembleInsertSegment(ThreadVars *tv, TcpReassemblyThreadCtx *ra_
             }
 #endif
         }
-    } else {
-        // EINVAL
-        StreamTcpSegmentReturntoPool(seg);
     }
 
     SCReturnInt(0);
@@ -746,36 +675,28 @@ static inline bool StreamTcpReturnSegmentCheck(const TcpStream *stream, const Tc
     SCReturnInt(true);
 }
 
-static inline uint64_t GetLeftEdgeForApp(Flow *f, TcpSession *ssn, TcpStream *stream)
+static inline uint64_t GetLeftEdge(TcpSession *ssn, TcpStream *stream)
 {
-    const FramesContainer *frames_container = AppLayerFramesGetContainer(f);
-    if (frames_container == NULL)
-        return STREAM_APP_PROGRESS(stream);
+    bool use_app = true;
+    bool use_raw = true;
+    bool use_log = true;
 
-    const Frames *frames =
-            stream == &ssn->client ? &frames_container->toserver : &frames_container->toclient;
-    //    const uint64_t x = FramesLeftEdge(stream, frames);
-    //  BUG_ON(x != (frames->left_edge_rel + STREAM_BASE_OFFSET(stream)));
-    //    return x;
-    const uint64_t o = (uint64_t)frames->left_edge_rel + STREAM_BASE_OFFSET(stream);
-    SCLogDebug(
-            "%s: frames left edge: %" PRIu64, &ssn->client == stream ? "toserver" : "toclient", o);
-    return o;
-}
-
-static inline uint64_t GetLeftEdge(Flow *f, TcpSession *ssn, TcpStream *stream)
-{
     uint64_t left_edge = 0;
-    const bool use_app = !(ssn->flags & STREAMTCP_FLAG_APP_LAYER_DISABLED);
-    const bool use_raw = !(stream->flags & STREAMTCP_STREAM_FLAG_DISABLE_RAW);
-    const bool use_log = stream_config.streaming_log_api;
-    SCLogDebug("use_app %d use_raw %d use_log %d tcp win %u", use_app, use_raw, use_log,
-            stream->window);
+    if ((ssn->flags & STREAMTCP_FLAG_APP_LAYER_DISABLED)) {
+        use_app = false; // app is dead
+    }
+
+    if (stream->flags & STREAMTCP_STREAM_FLAG_DISABLE_RAW) {
+        use_raw = false; // raw is dead
+    }
+    if (!stream_config.streaming_log_api) {
+        use_log = false;
+    }
 
     if (use_raw) {
         uint64_t raw_progress = STREAM_RAW_PROGRESS(stream);
 
-        if (StreamTcpInlineMode()) {
+        if (StreamTcpInlineMode() == TRUE) {
             uint32_t chunk_size = (stream == &ssn->client) ?
                 stream_config.reassembly_toserver_chunk_size :
                 stream_config.reassembly_toclient_chunk_size;
@@ -788,7 +709,7 @@ static inline uint64_t GetLeftEdge(Flow *f, TcpSession *ssn, TcpStream *stream)
 
         /* apply min inspect depth: if it is set we need to keep data
          * before the raw progress. */
-        if (use_app && stream->min_inspect_depth && ssn->state < TCP_CLOSED) {
+        if (use_app && stream->min_inspect_depth) {
             if (raw_progress < stream->min_inspect_depth)
                 raw_progress = 0;
             else
@@ -799,21 +720,20 @@ static inline uint64_t GetLeftEdge(Flow *f, TcpSession *ssn, TcpStream *stream)
         }
 
         if (use_app) {
-            const uint64_t app_le = GetLeftEdgeForApp(f, ssn, stream);
-            left_edge = MIN(app_le, raw_progress);
-            SCLogDebug("left_edge %" PRIu64 ", using both app:%" PRIu64 ", raw:%" PRIu64, left_edge,
-                    app_le, raw_progress);
+            left_edge = MIN(STREAM_APP_PROGRESS(stream), raw_progress);
+            SCLogDebug("left_edge %"PRIu64", using both app:%"PRIu64", raw:%"PRIu64,
+                    left_edge, STREAM_APP_PROGRESS(stream), raw_progress);
         } else {
             left_edge = raw_progress;
             SCLogDebug("left_edge %"PRIu64", using only raw:%"PRIu64,
                     left_edge, raw_progress);
         }
     } else if (use_app) {
-        const uint64_t app_le = GetLeftEdgeForApp(f, ssn, stream);
-        left_edge = app_le;
-        SCLogDebug("left_edge %" PRIu64 ", using only app:%" PRIu64, left_edge, app_le);
+        left_edge = STREAM_APP_PROGRESS(stream);
+        SCLogDebug("left_edge %"PRIu64", using only app:%"PRIu64,
+                left_edge, STREAM_APP_PROGRESS(stream));
     } else {
-        left_edge = StreamingBufferGetConsecutiveDataRightEdge(&stream->sb);
+        left_edge = STREAM_BASE_OFFSET(stream) + stream->sb.buf_offset;
         SCLogDebug("no app & raw: left_edge %"PRIu64" (full stream)", left_edge);
     }
 
@@ -825,19 +745,21 @@ static inline uint64_t GetLeftEdge(Flow *f, TcpSession *ssn, TcpStream *stream)
         }
     }
 
-    uint64_t last_ack_abs = STREAM_BASE_OFFSET(stream);
-    if (STREAM_LASTACK_GT_BASESEQ(stream)) {
-        last_ack_abs += (stream->last_ack - stream->base_seq);
-    }
-    /* in IDS mode we shouldn't see the base_seq pass last_ack */
-    DEBUG_VALIDATE_BUG_ON(last_ack_abs < left_edge && !StreamTcpInlineMode() && !f->ffr &&
-                          ssn->state < TCP_CLOSED);
-    left_edge = MIN(left_edge, last_ack_abs);
+    /* in inline mode keep at least unack'd segments so we can check for overlaps */
+    if (StreamTcpInlineMode() == TRUE) {
+        uint64_t last_ack_abs = STREAM_BASE_OFFSET(stream);
+        if (STREAM_LASTACK_GT_BASESEQ(stream)) {
+            /* get window of data that is acked */
+            const uint32_t delta = stream->last_ack - stream->base_seq;
+            /* get max absolute offset */
+            last_ack_abs += delta;
+        }
+        left_edge = MIN(left_edge, last_ack_abs);
 
     /* if we're told to look for overlaps with different data we should
      * consider data that is ack'd as well. Injected packets may have
      * been ack'd or injected packet may be too late. */
-    if (!StreamTcpInlineMode() && check_overlap_different_data) {
+    } else if (check_overlap_different_data) {
         const uint32_t window = stream->window ? stream->window : 4096;
         if (window < left_edge)
             left_edge -= window;
@@ -911,7 +833,7 @@ void StreamTcpPruneSession(Flow *f, uint8_t flags)
         SCLogDebug("ssn %p / stream %p: reassembly depth reached, "
                  "STREAMTCP_STREAM_FLAG_NOREASSEMBLY set", ssn, stream);
         StreamTcpReturnStreamSegments(stream);
-        StreamingBufferClear(&stream->sb, &stream_config.sbcnf);
+        StreamingBufferClear(&stream->sb);
         return;
 
     } else if ((ssn->flags & STREAMTCP_FLAG_APP_LAYER_DISABLED) &&
@@ -920,21 +842,15 @@ void StreamTcpPruneSession(Flow *f, uint8_t flags)
                  "STREAMTCP_STREAM_FLAG_NOREASSEMBLY set", ssn, stream);
         stream->flags |= STREAMTCP_STREAM_FLAG_NOREASSEMBLY;
         StreamTcpReturnStreamSegments(stream);
-        StreamingBufferClear(&stream->sb, &stream_config.sbcnf);
+        StreamingBufferClear(&stream->sb);
         return;
     }
 
-    const uint64_t left_edge = GetLeftEdge(f, ssn, stream);
-    SCLogDebug("buffer left_edge %" PRIu64, left_edge);
+    const uint64_t left_edge = GetLeftEdge(ssn, stream);
     if (left_edge && left_edge > STREAM_BASE_OFFSET(stream)) {
-        DEBUG_VALIDATE_BUG_ON(left_edge - STREAM_BASE_OFFSET(stream) > UINT32_MAX);
-        uint32_t slide = (uint32_t)(left_edge - STREAM_BASE_OFFSET(stream));
+        uint32_t slide = left_edge - STREAM_BASE_OFFSET(stream);
         SCLogDebug("buffer sliding %u to offset %"PRIu64, slide, left_edge);
-
-        if (!(ssn->flags & STREAMTCP_FLAG_APP_LAYER_DISABLED)) {
-            AppLayerFramesSlide(f, slide, flags & (STREAM_TOSERVER | STREAM_TOCLIENT));
-        }
-        StreamingBufferSlideToOffset(&stream->sb, &stream_config.sbcnf, left_edge);
+        StreamingBufferSlideToOffset(&stream->sb, left_edge);
         stream->base_seq += slide;
 
         if (slide <= stream->app_progress_rel) {

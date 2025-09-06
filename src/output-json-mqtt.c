@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2021 Open Information Security Foundation
+/* Copyright (C) 2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -22,6 +22,7 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
 #include "detect.h"
 #include "pkt-var.h"
 #include "conf.h"
@@ -34,7 +35,6 @@
 #include "util-buffer.h"
 #include "util-debug.h"
 #include "util-byte.h"
-#include "util-misc.h"
 
 #include "output.h"
 #include "output-json.h"
@@ -42,56 +42,66 @@
 #include "app-layer.h"
 #include "app-layer-parser.h"
 
+#include "app-layer-mqtt.h"
 #include "output-json-mqtt.h"
 #include "rust.h"
 
 #define MQTT_LOG_PASSWORDS BIT_U32(0)
-#define MQTT_DEFAULT_FLAGS     (MQTT_LOG_PASSWORDS)
-#define MQTT_DEFAULT_MAXLOGLEN 1024
+#define MQTT_DEFAULTS (MQTT_LOG_PASSWORDS)
 
 typedef struct LogMQTTFileCtx_ {
-    uint32_t flags, max_log_len;
-    OutputJsonCtx *eve_ctx;
+    LogFileCtx *file_ctx;
+    uint32_t    flags;
 } LogMQTTFileCtx;
 
 typedef struct LogMQTTLogThread_ {
     LogMQTTFileCtx *mqttlog_ctx;
     uint32_t        count;
-    OutputJsonThreadCtx *ctx;
+    MemBuffer      *buffer;
+    LogFileCtx *file_ctx;
 } LogMQTTLogThread;
 
-bool JsonMQTTAddMetadata(void *vtx, SCJsonBuilder *js)
+bool JsonMQTTAddMetadata(const Flow *f, uint64_t tx_id, JsonBuilder *js)
 {
-    return SCMqttLoggerLog(vtx, MQTT_DEFAULT_FLAGS, MQTT_DEFAULT_MAXLOGLEN, js);
+    MQTTState *state = FlowGetAppState(f);
+    if (state) {
+        MQTTTransaction *tx = AppLayerParserGetTx(f->proto, ALPROTO_MQTT, state, tx_id);
+        if (tx) {
+            return rs_mqtt_logger_log(state, tx, MQTT_DEFAULTS, js);
+        }
+    }
+
+    return false;
 }
 
 static int JsonMQTTLogger(ThreadVars *tv, void *thread_data,
     const Packet *p, Flow *f, void *state, void *tx, uint64_t tx_id)
 {
     LogMQTTLogThread *thread = thread_data;
-    enum SCOutputJsonLogDirection dir;
+    enum OutputJsonLogDirection dir;
 
-    if (SCMqttTxIsToClient((MQTTTransaction *)tx)) {
+    if (rs_mqtt_tx_is_toclient((MQTTTransaction*) tx)) {
         dir = LOG_DIR_FLOW_TOCLIENT;
     } else {
         dir = LOG_DIR_FLOW_TOSERVER;
     }
 
-    SCJsonBuilder *js = CreateEveHeader(p, dir, "mqtt", NULL, thread->mqttlog_ctx->eve_ctx);
+    JsonBuilder *js = CreateEveHeader(p, dir, "mqtt", NULL);
     if (unlikely(js == NULL)) {
         return TM_ECODE_FAILED;
     }
 
-    if (!SCMqttLoggerLog(tx, thread->mqttlog_ctx->flags, thread->mqttlog_ctx->max_log_len, js))
+    if (!rs_mqtt_logger_log(state, tx, thread->mqttlog_ctx->flags, js))
         goto error;
 
-    OutputJsonBuilderBuffer(tv, p, p->flow, js, thread->ctx);
-    SCJbFree(js);
+    MemBufferReset(thread->buffer);
+    OutputJsonBuilderBuffer(js, thread->file_ctx, &thread->buffer);
+    jb_free(js);
 
     return TM_ECODE_OK;
 
 error:
-    SCJbFree(js);
+    jb_free(js);
     return TM_ECODE_FAILED;
 }
 
@@ -102,11 +112,11 @@ static void OutputMQTTLogDeInitCtxSub(OutputCtx *output_ctx)
     SCFree(output_ctx);
 }
 
-static void JsonMQTTLogParseConfig(SCConfNode *conf, LogMQTTFileCtx *mqttlog_ctx)
+static void JsonMQTTLogParseConfig(ConfNode *conf, LogMQTTFileCtx *mqttlog_ctx)
 {
-    const char *query = SCConfNodeLookupChildValue(conf, "passwords");
+    const char *query = ConfNodeLookupChildValue(conf, "passwords");
     if (query != NULL) {
-        if (SCConfValIsTrue(query)) {
+        if (ConfValIsTrue(query)) {
             mqttlog_ctx->flags |= MQTT_LOG_PASSWORDS;
         } else {
             mqttlog_ctx->flags &= ~MQTT_LOG_PASSWORDS;
@@ -114,18 +124,10 @@ static void JsonMQTTLogParseConfig(SCConfNode *conf, LogMQTTFileCtx *mqttlog_ctx
     } else {
         mqttlog_ctx->flags |= MQTT_LOG_PASSWORDS;
     }
-    uint32_t max_log_len = MQTT_DEFAULT_MAXLOGLEN;
-    query = SCConfNodeLookupChildValue(conf, "string-log-limit");
-    if (query != NULL) {
-        if (ParseSizeStringU32(query, &max_log_len) < 0) {
-            SCLogError("Error parsing string-log-limit from config - %s, ", query);
-            exit(EXIT_FAILURE);
-        }
-    }
-    mqttlog_ctx->max_log_len = max_log_len;
 }
 
-static OutputInitResult OutputMQTTLogInitSub(SCConfNode *conf, OutputCtx *parent_ctx)
+static OutputInitResult OutputMQTTLogInitSub(ConfNode *conf,
+    OutputCtx *parent_ctx)
 {
     OutputInitResult result = { NULL, false };
     OutputJsonCtx *ajt = parent_ctx->data;
@@ -134,7 +136,7 @@ static OutputInitResult OutputMQTTLogInitSub(SCConfNode *conf, OutputCtx *parent
     if (unlikely(mqttlog_ctx == NULL)) {
         return result;
     }
-    mqttlog_ctx->eve_ctx = ajt;
+    mqttlog_ctx->file_ctx = ajt->file_ctx;
 
     OutputCtx *output_ctx = SCCalloc(1, sizeof(*output_ctx));
     if (unlikely(output_ctx == NULL)) {
@@ -146,7 +148,7 @@ static OutputInitResult OutputMQTTLogInitSub(SCConfNode *conf, OutputCtx *parent
 
     JsonMQTTLogParseConfig(conf, mqttlog_ctx);
 
-    SCAppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_MQTT);
+    AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_MQTT);
 
     result.ctx = output_ctx;
     result.ok = true;
@@ -166,12 +168,14 @@ static TmEcode JsonMQTTLogThreadInit(ThreadVars *t, const void *initdata, void *
         return TM_ECODE_FAILED;
     }
 
-    thread->mqttlog_ctx = ((OutputCtx *)initdata)->data;
-    thread->ctx = CreateEveThreadCtx(t, thread->mqttlog_ctx->eve_ctx);
-    if (unlikely(thread->ctx == NULL)) {
+    thread->buffer = MemBufferCreateNew(JSON_OUTPUT_BUFFER_SIZE);
+    if (unlikely(thread->buffer == NULL)) {
         SCFree(thread);
         return TM_ECODE_FAILED;
     }
+
+    thread->mqttlog_ctx = ((OutputCtx *)initdata)->data;
+    thread->file_ctx = LogFileEnsureExists(thread->mqttlog_ctx->file_ctx, t->id);
 
     *data = (void *)thread;
 
@@ -184,14 +188,17 @@ static TmEcode JsonMQTTLogThreadDeinit(ThreadVars *t, void *data)
     if (thread == NULL) {
         return TM_ECODE_OK;
     }
-    FreeEveThreadCtx(thread->ctx);
+    if (thread->buffer != NULL) {
+        MemBufferFree(thread->buffer);
+    }
     SCFree(thread);
     return TM_ECODE_OK;
 }
 
 void JsonMQTTLogRegister(void)
 {
-    OutputRegisterTxSubModule(LOGGER_JSON_TX, "eve-log", "JsonMQTTLog", "eve-log.mqtt",
-            OutputMQTTLogInitSub, ALPROTO_MQTT, JsonMQTTLogger, JsonMQTTLogThreadInit,
-            JsonMQTTLogThreadDeinit);
+    OutputRegisterTxSubModule(LOGGER_JSON_MQTT, "eve-log",
+        "JsonMQTTLog", "eve-log.mqtt",
+        OutputMQTTLogInitSub, ALPROTO_MQTT, JsonMQTTLogger,
+        JsonMQTTLogThreadInit, JsonMQTTLogThreadDeinit, NULL);
 }

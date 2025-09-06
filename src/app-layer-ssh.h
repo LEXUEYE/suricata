@@ -22,12 +22,13 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_APP_LAYER_SSH_H
-#define SURICATA_APP_LAYER_SSH_H
+#ifndef __APP_LAYER_SSH_H__
+#define __APP_LAYER_SSH_H__
 
 void RegisterSSHParsers(void);
 void SSHParserRegisterTests(void);
 
-bool SSHTxLogCondition(ThreadVars *, const Packet *, void *state, void *tx, uint64_t tx_id);
+int SSHTxLogCondition(ThreadVars *, const Packet *, void *state, void *tx, uint64_t tx_id);
 
-#endif /* SURICATA_APP_LAYER_SSH_H */
+#endif /* __APP_LAYER_SSH_H__ */
+

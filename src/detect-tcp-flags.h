@@ -21,8 +21,12 @@
  * \author Breno Silva <breno.silva@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_FLAGS_H
-#define SURICATA_DETECT_FLAGS_H
+#ifndef __DETECT_FLAGS_H__
+#define __DETECT_FLAGS_H__
+
+#include "decode-events.h"
+#include "decode-ipv4.h"
+#include "decode-tcp.h"
 
 /**
  * \struct DetectFlagsData_
@@ -37,7 +41,7 @@
 typedef struct DetectFlagsData_ {
     uint8_t flags;  /**< TCP flags */
     uint8_t modifier; /**< !(1) +(2) *(3) modifiers */
-    uint8_t ignored_flags; /**< Ignored TCP flags defined by modifier , */
+    uint8_t ignored_flags;  /**< Ignored TCP flags defined by modifer , */
 } DetectFlagsData;
 
 /**
@@ -49,4 +53,4 @@ void DetectFlagsRegister (void);
 int DetectFlagsSignatureNeedsSynPackets(const Signature *s);
 int DetectFlagsSignatureNeedsSynOnlyPackets(const Signature *s);
 
-#endif /*SURICATA_DETECT_FLAGS_H */
+#endif /*__DETECT_FLAGS_H__ */

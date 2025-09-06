@@ -21,15 +21,15 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_FLOW_BIT_H
-#define SURICATA_FLOW_BIT_H
+#ifndef __FLOW_BIT_H__
+#define __FLOW_BIT_H__
 
 #include "flow.h"
 #include "util-var.h"
 
 typedef struct FlowBit_ {
-    uint16_t type; /* type, DETECT_FLOWBITS in this case */
-    uint8_t pad[2];
+    uint8_t type; /* type, DETECT_FLOWBITS in this case */
+    uint8_t pad[3];
     uint32_t idx; /* name idx */
     GenericVar *next; /* right now just implement this as a list,
                        * in the long run we have think of something
@@ -39,9 +39,10 @@ typedef struct FlowBit_ {
 void FlowBitFree(FlowBit *);
 void FlowBitRegisterTests(void);
 
-int FlowBitSet(Flow *, uint32_t);
+void FlowBitSet(Flow *, uint32_t);
 void FlowBitUnset(Flow *, uint32_t);
-bool FlowBitToggle(Flow *, uint32_t);
+void FlowBitToggle(Flow *, uint32_t);
 int FlowBitIsset(Flow *, uint32_t);
 int FlowBitIsnotset(Flow *, uint32_t);
-#endif /* SURICATA_FLOW_BIT_H */
+#endif /* __FLOW_BIT_H__ */
+

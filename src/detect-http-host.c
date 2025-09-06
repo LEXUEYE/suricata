@@ -37,7 +37,6 @@
 #include "detect.h"
 #include "detect-parse.h"
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-prefilter.h"
 #include "detect-content.h"
@@ -63,8 +62,7 @@ static int DetectHttpHHSetup(DetectEngineCtx *, Signature *, const char *);
 #ifdef UNITTESTS
 static void DetectHttpHHRegisterTests(void);
 #endif
-static bool DetectHttpHostValidateCallback(
-        const Signature *s, const char **sigerror, const DetectBufferType *dbt);
+static bool DetectHttpHostValidateCallback(const Signature *s, const char **sigerror);
 static int DetectHttpHostSetup(DetectEngineCtx *, Signature *, const char *);
 static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
         const DetectEngineTransforms *transforms,
@@ -90,16 +88,15 @@ static int g_http_host_buffer_id = 0;
 void DetectHttpHHRegister(void)
 {
     /* http_host content modifier */
-    sigmatch_table[DETECT_HTTP_HOST_CM].name = "http_host";
-    sigmatch_table[DETECT_HTTP_HOST_CM].desc = "content modifier to match on the HTTP hostname";
-    sigmatch_table[DETECT_HTTP_HOST_CM].url =
-            "/rules/http-keywords.html#http-host-and-http-raw-host";
-    sigmatch_table[DETECT_HTTP_HOST_CM].Setup = DetectHttpHHSetup;
+    sigmatch_table[DETECT_AL_HTTP_HOST].name = "http_host";
+    sigmatch_table[DETECT_AL_HTTP_HOST].desc = "content modifier to match on the HTTP hostname";
+    sigmatch_table[DETECT_AL_HTTP_HOST].url = "/rules/http-keywords.html#http-host-and-http-raw-host";
+    sigmatch_table[DETECT_AL_HTTP_HOST].Setup = DetectHttpHHSetup;
 #ifdef UNITTESTS
-    sigmatch_table[DETECT_HTTP_HOST_CM].RegisterTests = DetectHttpHHRegisterTests;
+    sigmatch_table[DETECT_AL_HTTP_HOST].RegisterTests = DetectHttpHHRegisterTests;
 #endif
-    sigmatch_table[DETECT_HTTP_HOST_CM].flags |= SIGMATCH_NOOPT | SIGMATCH_INFO_CONTENT_MODIFIER;
-    sigmatch_table[DETECT_HTTP_HOST_CM].alternative = DETECT_HTTP_HOST;
+    sigmatch_table[DETECT_AL_HTTP_HOST].flags |= SIGMATCH_NOOPT|SIGMATCH_INFO_CONTENT_MODIFIER;
+    sigmatch_table[DETECT_AL_HTTP_HOST].alternative = DETECT_HTTP_HOST;
 
     /* http.host sticky buffer */
     sigmatch_table[DETECT_HTTP_HOST].name = "http.host";
@@ -108,16 +105,18 @@ void DetectHttpHHRegister(void)
     sigmatch_table[DETECT_HTTP_HOST].Setup = DetectHttpHostSetup;
     sigmatch_table[DETECT_HTTP_HOST].flags |= SIGMATCH_NOOPT|SIGMATCH_INFO_STICKY_BUFFER;
 
-    DetectAppLayerInspectEngineRegister("http_host", ALPROTO_HTTP1, SIG_FLAG_TOSERVER,
-            HTP_REQUEST_PROGRESS_HEADERS, DetectEngineInspectBufferGeneric, GetData);
+    DetectAppLayerInspectEngineRegister2("http_host", ALPROTO_HTTP,
+            SIG_FLAG_TOSERVER, HTP_REQUEST_HEADERS,
+            DetectEngineInspectBufferGeneric, GetData);
 
-    DetectAppLayerMpmRegister("http_host", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
-            GetData, ALPROTO_HTTP1, HTP_REQUEST_PROGRESS_HEADERS);
+    DetectAppLayerMpmRegister2("http_host", SIG_FLAG_TOSERVER, 2,
+            PrefilterGenericMpmRegister, GetData, ALPROTO_HTTP,
+            HTP_REQUEST_HEADERS);
 
-    DetectAppLayerInspectEngineRegister("http_host", ALPROTO_HTTP2, SIG_FLAG_TOSERVER,
+    DetectAppLayerInspectEngineRegister2("http_host", ALPROTO_HTTP2, SIG_FLAG_TOSERVER,
             HTTP2StateDataClient, DetectEngineInspectBufferGeneric, GetData2);
 
-    DetectAppLayerMpmRegister("http_host", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
+    DetectAppLayerMpmRegister2("http_host", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
             GetData2, ALPROTO_HTTP2, HTTP2StateDataClient);
 
     DetectBufferTypeRegisterValidateCallback("http_host",
@@ -129,14 +128,12 @@ void DetectHttpHHRegister(void)
     g_http_host_buffer_id = DetectBufferTypeGetByName("http_host");
 
     /* http_raw_host content modifier */
-    sigmatch_table[DETECT_HTTP_RAW_HOST].name = "http_raw_host";
-    sigmatch_table[DETECT_HTTP_RAW_HOST].desc = "content modifier to match on the HTTP host header "
-                                                "or the raw hostname from the HTTP uri";
-    sigmatch_table[DETECT_HTTP_RAW_HOST].url =
-            "/rules/http-keywords.html#http-host-and-http-raw-host";
-    sigmatch_table[DETECT_HTTP_RAW_HOST].Setup = DetectHttpHRHSetup;
-    sigmatch_table[DETECT_HTTP_RAW_HOST].flags |= SIGMATCH_NOOPT | SIGMATCH_INFO_CONTENT_MODIFIER;
-    sigmatch_table[DETECT_HTTP_RAW_HOST].alternative = DETECT_HTTP_HOST_RAW;
+    sigmatch_table[DETECT_AL_HTTP_RAW_HOST].name = "http_raw_host";
+    sigmatch_table[DETECT_AL_HTTP_RAW_HOST].desc = "content modifier to match on the HTTP host header or the raw hostname from the HTTP uri";
+    sigmatch_table[DETECT_AL_HTTP_RAW_HOST].url = "/rules/http-keywords.html#http-host-and-http-raw-host";
+    sigmatch_table[DETECT_AL_HTTP_RAW_HOST].Setup = DetectHttpHRHSetup;
+    sigmatch_table[DETECT_AL_HTTP_RAW_HOST].flags |= SIGMATCH_NOOPT|SIGMATCH_INFO_CONTENT_MODIFIER;
+    sigmatch_table[DETECT_AL_HTTP_RAW_HOST].alternative = DETECT_HTTP_HOST_RAW;
 
     /* http.host sticky buffer */
     sigmatch_table[DETECT_HTTP_HOST_RAW].name = "http.host.raw";
@@ -145,16 +142,18 @@ void DetectHttpHHRegister(void)
     sigmatch_table[DETECT_HTTP_HOST_RAW].Setup = DetectHttpHostRawSetupSticky;
     sigmatch_table[DETECT_HTTP_HOST_RAW].flags |= SIGMATCH_NOOPT|SIGMATCH_INFO_STICKY_BUFFER;
 
-    DetectAppLayerInspectEngineRegister("http_raw_host", ALPROTO_HTTP1, SIG_FLAG_TOSERVER,
-            HTP_REQUEST_PROGRESS_HEADERS, DetectEngineInspectBufferGeneric, GetRawData);
+    DetectAppLayerInspectEngineRegister2("http_raw_host", ALPROTO_HTTP,
+            SIG_FLAG_TOSERVER, HTP_REQUEST_HEADERS,
+            DetectEngineInspectBufferGeneric, GetRawData);
 
-    DetectAppLayerMpmRegister("http_raw_host", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
-            GetRawData, ALPROTO_HTTP1, HTP_REQUEST_PROGRESS_HEADERS);
+    DetectAppLayerMpmRegister2("http_raw_host", SIG_FLAG_TOSERVER, 2,
+            PrefilterGenericMpmRegister, GetRawData, ALPROTO_HTTP,
+            HTP_REQUEST_HEADERS);
 
-    DetectAppLayerInspectEngineRegister("http_raw_host", ALPROTO_HTTP2, SIG_FLAG_TOSERVER,
+    DetectAppLayerInspectEngineRegister2("http_raw_host", ALPROTO_HTTP2, SIG_FLAG_TOSERVER,
             HTTP2StateDataClient, DetectEngineInspectBufferGeneric, GetRawData2);
 
-    DetectAppLayerMpmRegister("http_raw_host", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
+    DetectAppLayerMpmRegister2("http_raw_host", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
             GetRawData2, ALPROTO_HTTP2, HTTP2StateDataClient);
 
     DetectBufferTypeSetDescriptionByName("http_raw_host",
@@ -178,48 +177,46 @@ void DetectHttpHHRegister(void)
  */
 static int DetectHttpHHSetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
 {
-    return DetectEngineContentModifierBufferSetup(
-            de_ctx, s, arg, DETECT_HTTP_HOST_CM, g_http_host_buffer_id, ALPROTO_HTTP1);
+    return DetectEngineContentModifierBufferSetup(de_ctx, s, arg,
+                                                  DETECT_AL_HTTP_HOST,
+                                                  g_http_host_buffer_id,
+                                                  ALPROTO_HTTP);
 }
 
-static bool DetectHttpHostValidateCallback(
-        const Signature *s, const char **sigerror, const DetectBufferType *dbt)
+static bool DetectHttpHostValidateCallback(const Signature *s, const char **sigerror)
 {
-    for (uint32_t x = 0; x < s->init_data->buffer_index; x++) {
-        if (s->init_data->buffers[x].id != (uint32_t)dbt->id)
-            continue;
-        const SigMatch *sm = s->init_data->buffers[x].head;
-        for (; sm != NULL; sm = sm->next) {
-            if (sm->type == DETECT_CONTENT) {
-                DetectContentData *cd = (DetectContentData *)sm->ctx;
-                if (cd->flags & DETECT_CONTENT_NOCASE) {
-                    *sigerror = "http.host keyword "
-                                "specified along with \"nocase\". "
-                                "The hostname buffer is normalized "
-                                "to lowercase, specifying "
-                                "nocase is redundant.";
-                    SCLogWarning("rule %u: %s", s->id, *sigerror);
-                    return false;
-                } else {
-                    uint32_t u;
-                    for (u = 0; u < cd->content_len; u++) {
-                        if (isupper(cd->content[u]))
-                            break;
-                    }
-                    if (u != cd->content_len) {
-                        *sigerror = "A pattern with "
-                                    "uppercase characters detected for http.host. "
-                                    "The hostname buffer is normalized to lowercase, "
-                                    "please specify a lowercase pattern.";
-                        SCLogWarning("rule %u: %s", s->id, *sigerror);
-                        return false;
-                    }
+    const SigMatch *sm = s->init_data->smlists[g_http_host_buffer_id];
+    for ( ; sm != NULL; sm = sm->next) {
+        if (sm->type == DETECT_CONTENT) {
+            DetectContentData *cd = (DetectContentData *)sm->ctx;
+            if (cd->flags & DETECT_CONTENT_NOCASE) {
+                *sigerror = "http_host keyword "
+                        "specified along with \"nocase\". "
+                        "Since the hostname buffer we match against "
+                        "is actually lowercase.  So having a "
+                        "nocase is redundant.";
+                SCLogWarning(SC_WARN_POOR_RULE, "rule %u: %s", s->id, *sigerror);
+                return FALSE;
+            } else {
+                uint32_t u;
+                for (u = 0; u < cd->content_len; u++) {
+                    if (isupper(cd->content[u]))
+                        break;
+                }
+                if (u != cd->content_len) {
+                    *sigerror = "A pattern with "
+                            "uppercase chars detected for http_host.  "
+                            "Since the hostname buffer we match against "
+                            "is lowercase only, please specify a "
+                            "lowercase pattern.";
+                    SCLogWarning(SC_WARN_POOR_RULE, "rule %u: %s", s->id, *sigerror);
+                    return FALSE;
                 }
             }
         }
     }
 
-    return true;
+    return TRUE;
 }
 
 /**
@@ -233,9 +230,9 @@ static bool DetectHttpHostValidateCallback(
  */
 static int DetectHttpHostSetup(DetectEngineCtx *de_ctx, Signature *s, const char *str)
 {
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_http_host_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_http_host_buffer_id) < 0)
         return -1;
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_HTTP) < 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_HTTP) < 0)
         return -1;
     return 0;
 }
@@ -248,14 +245,14 @@ static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
     if (buffer->inspect == NULL) {
         htp_tx_t *tx = (htp_tx_t *)txv;
 
-        if (htp_tx_request_hostname(tx) == NULL)
+        if (tx->request_hostname == NULL)
             return NULL;
 
-        const uint32_t data_len = (uint32_t)bstr_len(htp_tx_request_hostname(tx));
-        const uint8_t *data = bstr_ptr(htp_tx_request_hostname(tx));
+        const uint32_t data_len = bstr_len(tx->request_hostname);
+        const uint8_t *data = bstr_ptr(tx->request_hostname);
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, data, data_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, data, data_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;
@@ -270,12 +267,13 @@ static InspectionBuffer *GetData2(DetectEngineThreadCtx *det_ctx,
         uint32_t b_len = 0;
         const uint8_t *b = NULL;
 
-        if (SCHttp2TxGetHostNorm(txv, &b, &b_len) != 1)
+        if (rs_http2_tx_get_host_norm(txv, &b, &b_len) != 1)
             return NULL;
         if (b == NULL || b_len == 0)
             return NULL;
 
-        InspectionBufferSetupAndApplyTransforms(det_ctx, list_id, buffer, b, b_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, b, b_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;
@@ -290,12 +288,13 @@ static InspectionBuffer *GetRawData2(DetectEngineThreadCtx *det_ctx,
         uint32_t b_len = 0;
         const uint8_t *b = NULL;
 
-        if (SCHttp2TxGetHost(txv, &b, &b_len) != 1)
+        if (rs_http2_tx_get_host(txv, &b, &b_len) != 1)
             return NULL;
         if (b == NULL || b_len == 0)
             return NULL;
 
-        InspectionBufferSetupAndApplyTransforms(det_ctx, list_id, buffer, b, b_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, b, b_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;
@@ -316,8 +315,10 @@ static InspectionBuffer *GetRawData2(DetectEngineThreadCtx *det_ctx,
  */
 int DetectHttpHRHSetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
 {
-    return DetectEngineContentModifierBufferSetup(
-            de_ctx, s, arg, DETECT_HTTP_RAW_HOST, g_http_raw_host_buffer_id, ALPROTO_HTTP1);
+    return DetectEngineContentModifierBufferSetup(de_ctx, s, arg,
+                                                  DETECT_AL_HTTP_RAW_HOST,
+                                                  g_http_raw_host_buffer_id,
+                                                  ALPROTO_HTTP);
 }
 
 /**
@@ -331,9 +332,9 @@ int DetectHttpHRHSetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
  */
 static int DetectHttpHostRawSetupSticky(DetectEngineCtx *de_ctx, Signature *s, const char *str)
 {
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_http_raw_host_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_http_raw_host_buffer_id) < 0)
         return -1;
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_HTTP) < 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_HTTP) < 0)
         return -1;
     return 0;
 }
@@ -349,23 +350,24 @@ static InspectionBuffer *GetRawData(DetectEngineThreadCtx *det_ctx,
         const uint8_t *data = NULL;
         uint32_t data_len = 0;
 
-        if (htp_uri_hostname(htp_tx_parsed_uri(tx)) == NULL) {
-            if (htp_tx_request_headers(tx) == NULL)
+        if (tx->parsed_uri == NULL || tx->parsed_uri->hostname == NULL) {
+            if (tx->request_headers == NULL)
                 return NULL;
 
-            const htp_header_t *h = htp_tx_request_header(tx, "Host");
-            if (h == NULL || htp_header_value(h) == NULL)
+            htp_header_t *h = (htp_header_t *)htp_table_get_c(tx->request_headers,
+                    "Host");
+            if (h == NULL || h->value == NULL)
                 return NULL;
 
-            data = htp_header_value_ptr(h);
-            data_len = (uint32_t)htp_header_value_len(h);
+            data = (const uint8_t *)bstr_ptr(h->value);
+            data_len = bstr_len(h->value);
         } else {
-            data = (const uint8_t *)bstr_ptr(htp_uri_hostname(htp_tx_parsed_uri(tx)));
-            data_len = (uint32_t)bstr_len(htp_uri_hostname(htp_tx_parsed_uri(tx)));
+            data = (const uint8_t *)bstr_ptr(tx->parsed_uri->hostname);
+            data_len = bstr_len(tx->parsed_uri->hostname);
         }
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, data, data_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, data, data_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;

@@ -15,7 +15,7 @@
  * 02110-1301, USA.
  */
 
-//! RDP parser, logger and application layer module.
+//! RDP parser and application layer
 //!
 //! written by Zach Kelly <zach.kelly@lmco.com>
 

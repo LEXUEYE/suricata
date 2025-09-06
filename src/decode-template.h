@@ -22,10 +22,13 @@
  *
  */
 
-#ifndef SURICATA_DECODE_TEMPLATE_H
-#define SURICATA_DECODE_TEMPLATE_H
+#ifndef __DECODE_TEMPLATE_H__
+#define __DECODE_TEMPLATE_H__
 
-/* Header layout. Keep things like alignment and endianness in
+#include "decode.h"
+#include "threadvars.h"
+
+/* Header layout. Keep things like alignment and endianess in
  * mind while constructing this. */
 
 typedef struct TemplateHdr_ {
@@ -34,4 +37,4 @@ typedef struct TemplateHdr_ {
     uint16_t pad1;
 } __attribute__((__packed__)) TemplateHdr;
 
-#endif /* SURICATA_DECODE_TEMPLATE_H */
+#endif /* __DECODE_TEMPLATE_H__ */

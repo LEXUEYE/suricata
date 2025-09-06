@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_IPPAIR_QUEUE_H
-#define SURICATA_IPPAIR_QUEUE_H
+#ifndef __IPPAIR_QUEUE_H__
+#define __IPPAIR_QUEUE_H__
 
 #include "suricata-common.h"
 #include "ippair.h"
@@ -77,6 +77,7 @@ IPPairQueue *IPPairQueueInit(IPPairQueue *);
 void IPPairQueueDestroy (IPPairQueue *);
 
 void IPPairEnqueue (IPPairQueue *, IPPair *);
-IPPair *IPPairDequeue(IPPairQueue *);
+IPPair *IPPairDequeue (IPPairQueue *);
+uint32_t IPPairQueueLen(IPPairQueue *);
 
-#endif /* SURICATA_IPPAIR_QUEUE_H */
+#endif /* __IPPAIR_QUEUE_H__ */

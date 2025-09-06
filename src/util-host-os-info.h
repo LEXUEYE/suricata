@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,17 +21,18 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_HOST_OS_INFO_H
-#define SURICATA_UTIL_HOST_OS_INFO_H
+#ifndef __UTIL_HOST_OS_INFO_H__
+#define __UTIL_HOST_OS_INFO_H__
 
 #define SC_HINFO_IS_IPV6 0
 #define SC_HINFO_IS_IPV4 1
 
 int SCHInfoAddHostOSInfo(const char *, const char *, int);
+int SCHInfoGetHostOSFlavour(const char *);
 int SCHInfoGetIPv4HostOSFlavour(uint8_t *);
 int SCHInfoGetIPv6HostOSFlavour(uint8_t *);
 void SCHInfoCleanResources(void);
 void SCHInfoLoadFromConfig(void);
 void SCHInfoRegisterTests(void);
 
-#endif /* SURICATA_UTIL_HOST_OS_INFO_H */
+#endif /* __UTIL_HOST_OS_INFO_H__ */

@@ -21,8 +21,8 @@
  * \author Gerardo Iglesias Galvan <iglesiasg@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_ICMP_ID_H
-#define SURICATA_DETECT_ICMP_ID_H
+#ifndef __DETECT_ICMP_ID_H__
+#define __DETECT_ICMP_ID_H__
 
 typedef struct DetectIcmpIdData_ {
     uint16_t id; /**< id in network byte error */
@@ -31,4 +31,4 @@ typedef struct DetectIcmpIdData_ {
 /* prototypes */
 void DetectIcmpIdRegister(void);
 
-#endif /* SURICATA_DETECT_ICMP_ID_H */
+#endif /* __DETECT_ICMP_ID__ */

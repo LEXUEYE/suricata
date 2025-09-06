@@ -22,21 +22,21 @@
  *
  */
 
-#ifndef SURICATA_UTIL_UTIL_CONF_H
-#define SURICATA_UTIL_UTIL_CONF_H
+#ifndef __UTIL_UTIL_CONF_H__
+#define __UTIL_UTIL_CONF_H__
 
 #include "conf.h"
 
 TmEcode ConfigSetLogDirectory(const char *name);
-const char *SCConfigGetLogDirectory(void);
+const char *ConfigGetLogDirectory(void);
 TmEcode ConfigCheckLogDirectoryExists(const char *log_dir);
 
 TmEcode ConfigSetDataDirectory(char *name);
 const char *ConfigGetDataDirectory(void);
 TmEcode ConfigCheckDataDirectory(const char *log_dir);
 
-SCConfNode *ConfFindDeviceConfig(SCConfNode *node, const char *iface);
+ConfNode *ConfFindDeviceConfig(ConfNode *node, const char *iface);
 
 int ConfUnixSocketIsEnable(void);
 
-#endif /* SURICATA_UTIL_UTIL_CONF_H */
+#endif /* __UTIL_UTIL_CONF_H__ */

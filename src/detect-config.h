@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_CONFIG_H
-#define SURICATA_DETECT_CONFIG_H
+#ifndef __DETECT_CONFIG_H__
+#define __DETECT_CONFIG_H__
 
 #include "util-config.h"
 
@@ -35,4 +35,4 @@ typedef struct DetectConfigData_ {
 /* prototypes */
 void DetectConfigRegister (void);
 
-#endif /* SURICATA_DETECT_CONFIG_H */
+#endif /* __DETECT_CONFIG_H__ */

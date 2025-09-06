@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2011 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,22 +21,19 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_ENGINE_ALERT_H
-#define SURICATA_DETECT_ENGINE_ALERT_H
+#ifndef __DETECT_ENGINE_ALERT_H__
+#define __DETECT_ENGINE_ALERT_H__
 
 #include "suricata-common.h"
 #include "decode.h"
 #include "detect.h"
 
-void AlertQueueInit(DetectEngineThreadCtx *det_ctx);
-void AlertQueueFree(DetectEngineThreadCtx *det_ctx);
-void AlertQueueAppend(DetectEngineThreadCtx *det_ctx, const Signature *s, Packet *p, uint64_t tx_id,
-        uint8_t alert_flags);
-void PacketAlertFinalize(const DetectEngineCtx *, DetectEngineThreadCtx *, Packet *);
-#ifdef UNITTESTS
+void PacketAlertFinalize(DetectEngineCtx *, DetectEngineThreadCtx *, Packet *);
+int PacketAlertAppend(DetectEngineThreadCtx *, const Signature *,
+        Packet *, uint64_t tx_id, uint8_t);
 int PacketAlertCheck(Packet *, uint32_t);
-#endif
+int PacketAlertRemove(Packet *, uint16_t);
 void PacketAlertTagInit(void);
-void DetectEngineAlertRegisterTests(void);
+PacketAlert *PacketAlertGetTag(void);
 
-#endif /* SURICATA_DETECT_ENGINE_ALERT_H */
+#endif /* __DETECT_ENGINE_ALERT_H__ */

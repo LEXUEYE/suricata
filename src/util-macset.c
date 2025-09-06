@@ -33,7 +33,6 @@
 #include "util-macset.h"
 #include "util-unittest.h"
 #include "util-unittest-helper.h"
-#include "conf.h"
 
 typedef uint8_t MacAddr[6];
 typedef enum {
@@ -57,22 +56,21 @@ struct MacSet_ {
         last[2];
 };
 
-FlowStorageId g_macset_storage_id = { .id = -1 };
+int g_macset_storage_id = -1;
 
 void MacSetRegisterFlowStorage(void)
 {
-    SCConfNode *root = SCConfGetNode("outputs");
-    SCConfNode *node = NULL;
+    ConfNode *root = ConfGetNode("outputs");
+    ConfNode *node = NULL;
     /* we only need to register if at least one enabled 'eve-log' output
        has the ethernet setting enabled */
     if (root != NULL) {
         TAILQ_FOREACH(node, &root->head, next) {
             if (node->val && strcmp(node->val, "eve-log") == 0) {
-                const char *enabled = SCConfNodeLookupChildValue(node->head.tqh_first, "enabled");
-                if (enabled != NULL && SCConfValIsTrue(enabled)) {
-                    const char *ethernet =
-                            SCConfNodeLookupChildValue(node->head.tqh_first, "ethernet");
-                    if (ethernet != NULL && SCConfValIsTrue(ethernet)) {
+                const char *enabled = ConfNodeLookupChildValue(node->head.tqh_first, "enabled");
+                if (enabled != NULL && ConfValIsTrue(enabled)) {
+                    const char *ethernet = ConfNodeLookupChildValue(node->head.tqh_first, "ethernet");
+                    if (ethernet != NULL && ConfValIsTrue(ethernet)) {
                         g_macset_storage_id = FlowStorageRegister("macset", sizeof(void *),
                                                                   NULL, (void(*)(void *)) MacSetFree);
                         return;
@@ -85,7 +83,7 @@ void MacSetRegisterFlowStorage(void)
 
 bool MacSetFlowStorageEnabled(void)
 {
-    return (g_macset_storage_id.id != -1);
+    return (g_macset_storage_id != -1);
 }
 
 
@@ -97,7 +95,7 @@ MacSet *MacSetInit(int size)
     }
     ms = SCCalloc(1, sizeof(*ms));
     if (unlikely(ms == NULL)) {
-        SCLogError("Unable to allocate MacSet memory");
+        SCLogError(SC_ERR_MEM_ALLOC, "Unable to allocate MacSet memory");
         return NULL;
     }
     (void) SC_ATOMIC_ADD(flow_memuse, (sizeof(*ms)));
@@ -112,17 +110,16 @@ MacSet *MacSetInit(int size)
     return ms;
 }
 
-FlowStorageId MacSetGetFlowStorageID(void)
+int MacSetGetFlowStorageID(void)
 {
     return g_macset_storage_id;
 }
 
-static inline void MacUpdateEntry(
-        MacSet *ms, const uint8_t *addr, int side, ThreadVars *tv, uint16_t ctr)
+static inline void MacUpdateEntry(MacSet *ms, uint8_t *addr, int side, ThreadVars *tv, uint16_t ctr)
 {
     switch (ms->state[side]) {
         case EMPTY_SET:
-            memcpy(ms->singles[side], addr, sizeof(MacAddr));
+            memcpy(ms->singles[side], addr, sizeof(MacAddr));;
             ms->state[side] = SINGLE_MAC;
             if (tv != NULL)
                 StatsSetUI64(tv, ctr, 1);
@@ -136,8 +133,8 @@ static inline void MacUpdateEntry(
                     }
                     ms->buf[side] = SCCalloc(ms->size, sizeof(MacAddr));
                     if (unlikely(ms->buf[side] == NULL)) {
-                        SCLogError("Unable to allocate "
-                                   "MacSet memory");
+                        SCLogError(SC_ERR_MEM_ALLOC, "Unable to allocate "
+                                                     "MacSet memory");
                         return;
                     }
                     (void) SC_ATOMIC_ADD(flow_memuse, (ms->size * sizeof(MacAddr)));
@@ -179,8 +176,8 @@ static inline void MacUpdateEntry(
     }
 }
 
-void MacSetAddWithCtr(MacSet *ms, const uint8_t *src_addr, const uint8_t *dst_addr, ThreadVars *tv,
-        uint16_t ctr_src, uint16_t ctr_dst)
+void MacSetAddWithCtr(MacSet *ms, uint8_t *src_addr, uint8_t *dst_addr, ThreadVars *tv,
+                      uint16_t ctr_src, uint16_t ctr_dst)
 {
     if (ms == NULL)
         return;
@@ -188,7 +185,7 @@ void MacSetAddWithCtr(MacSet *ms, const uint8_t *src_addr, const uint8_t *dst_ad
     MacUpdateEntry(ms, dst_addr, MAC_SET_DST, tv, ctr_dst);
 }
 
-void MacSetAdd(MacSet *ms, const uint8_t *src_addr, const uint8_t *dst_addr)
+void MacSetAdd(MacSet *ms, uint8_t *src_addr, uint8_t *dst_addr)
 {
     MacSetAddWithCtr(ms, src_addr, dst_addr, NULL, 0, 0);
 }
@@ -231,19 +228,6 @@ int MacSetForEach(const MacSet *ms, MacSetIteratorFunc IterFunc, void *data)
     return MacSetIterateSide(ms, IterFunc, MAC_SET_DST, data);
 }
 
-uint8_t *MacSetGetFirst(const MacSet *ms, MacSetSide side)
-{
-    switch (ms->state[side]) {
-        case EMPTY_SET:
-            return NULL;
-        case SINGLE_MAC:
-            return (uint8_t *)ms->singles[side];
-        case MULTI_MAC:
-            return (uint8_t *)ms->buf[side][0];
-    }
-    return NULL;
-}
-
 int MacSetSize(const MacSet *ms)
 {
     int size = 0;
@@ -273,6 +257,14 @@ int MacSetSize(const MacSet *ms)
             break;
     }
     return size;
+}
+
+void MacSetReset(MacSet *ms)
+{
+    if (ms == NULL)
+        return;
+    ms->state[MAC_SET_SRC] = ms->state[MAC_SET_DST] = EMPTY_SET;
+    ms->last[MAC_SET_SRC] = ms->last[MAC_SET_DST] = 0;
 }
 
 void MacSetFree(MacSet *ms)
@@ -342,6 +334,16 @@ static int MacSetTest01(void)
     ret = MacSetForEach(ms, CheckTest1Membership, &i);
     FAIL_IF_NOT(ret == 0);
 
+    MacSetReset(ms);
+    FAIL_IF_NOT(MacSetSize(ms) == 0);
+
+    MacSetAdd(ms, addr2, addr3);
+    FAIL_IF_NOT(MacSetSize(ms) == 2);
+
+    i = 1;
+    ret = MacSetForEach(ms, CheckTest1Membership, &i);
+    FAIL_IF_NOT(ret == 0);
+
     MacSetFree(ms);
     PASS;
 }
@@ -373,13 +375,14 @@ static int MacSetTest02(void)
 static int MacSetTest03(void)
 {
     MacSet *ms = NULL;
+    int i = 0;
     SC_ATOMIC_SET(flow_config.memcap, 10000);
 
     ms = MacSetInit(10);
     FAIL_IF_NULL(ms);
     FAIL_IF_NOT(MacSetSize(ms) == 0);
 
-    for (uint8_t i = 1; i < 100; i++) {
+    for (i = 1; i < 100; i++) {
         MacAddr addr1 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x1},
                 addr2 = {0x1, 0x0, 0x0, 0x0, 0x0, 0x1};
         addr1[5] = i;
@@ -406,14 +409,14 @@ static int MacSetTest04(void)
 static int MacSetTest05(void)
 {
     MacSet *ms = NULL;
-    int ret = 0;
+    int ret = 0, i = 0;
     SC_ATOMIC_SET(flow_config.memcap, 64);
 
     ms = MacSetInit(10);
     FAIL_IF_NULL(ms);
     FAIL_IF_NOT(MacSetSize(ms) == 0);
 
-    for (uint8_t i = 1; i < 100; i++) {
+    for (i = 1; i < 100; i++) {
         MacAddr addr1 = {0x0, 0x0, 0x0, 0x0, 0x0, 0x1},
                 addr2 = {0x1, 0x0, 0x0, 0x0, 0x0, 0x1};
         addr1[5] = i;
@@ -422,42 +425,8 @@ static int MacSetTest05(void)
     }
     FAIL_IF_NOT(MacSetSize(ms) == 2);
 
-    int i2 = 100;
-    ret = MacSetForEach(ms, CheckTest1Membership, &i2);
+    ret = MacSetForEach(ms, CheckTest1Membership, &i);
     FAIL_IF_NOT(ret == 0);
-
-    MacSetFree(ms);
-    PASS;
-}
-
-static int MacSetTest06(void)
-{
-    SC_ATOMIC_SET(flow_config.memcap, 128);
-
-    MacSet *ms = MacSetInit(10);
-    FAIL_IF_NULL(ms);
-    FAIL_IF_NOT(MacSetSize(ms) == 0);
-
-    uint8_t *src0 = MacSetGetFirst(ms, MAC_SET_SRC);
-    uint8_t *dst0 = MacSetGetFirst(ms, MAC_SET_DST);
-
-    MacAddr addr1 = { 0x0, 0x0, 0x0, 0x0, 0x0, 0x1 }, addr2 = { 0x0, 0x0, 0x0, 0x0, 0x0, 0x2 },
-            addr3 = { 0x0, 0x0, 0x0, 0x0, 0x0, 0x3 }, addr4 = { 0x0, 0x0, 0x0, 0x0, 0x0, 0x4 };
-
-    MacSetAdd(ms, addr1, addr2);
-    uint8_t *src1 = MacSetGetFirst(ms, MAC_SET_SRC);
-    uint8_t *dst1 = MacSetGetFirst(ms, MAC_SET_DST);
-
-    MacSetAdd(ms, addr3, addr4);
-    uint8_t *src2 = MacSetGetFirst(ms, MAC_SET_SRC);
-    uint8_t *dst2 = MacSetGetFirst(ms, MAC_SET_DST);
-
-    FAIL_IF_NOT_NULL(src0);
-    FAIL_IF_NOT_NULL(dst0);
-    FAIL_IF_NOT(src1[5] == addr1[5]);
-    FAIL_IF_NOT(dst1[5] == addr2[5]);
-    FAIL_IF_NOT(src2[5] == addr1[5]);
-    FAIL_IF_NOT(dst2[5] == addr2[5]);
 
     MacSetFree(ms);
     PASS;
@@ -474,6 +443,7 @@ void MacSetRegisterTests(void)
     UtRegisterTest("MacSetTest03", MacSetTest03);
     UtRegisterTest("MacSetTest04", MacSetTest04);
     UtRegisterTest("MacSetTest05", MacSetTest05);
-    UtRegisterTest("MacSetTest06", MacSetTest06);
 #endif
+
+    return;
 }

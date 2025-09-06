@@ -30,6 +30,7 @@
 
 #include "detect-krb5-errcode.h"
 
+#include "app-layer-krb5.h"
 #include "rust.h"
 
 /**
@@ -48,6 +49,12 @@ static void DetectKrb5ErrCodeFree (DetectEngineCtx *, void *);
 static void DetectKrb5ErrCodeRegisterTests (void);
 #endif
 
+static int DetectEngineInspectKRB5Generic(ThreadVars *tv,
+        DetectEngineCtx *de_ctx, DetectEngineThreadCtx *det_ctx,
+        const Signature *s, const SigMatchData *smd,
+        Flow *f, uint8_t flags, void *alstate,
+        void *txv, uint64_t tx_id);
+
 static int g_krb5_err_code_list_id = 0;
 
 /**
@@ -57,28 +64,39 @@ static int g_krb5_err_code_list_id = 0;
  */
 void DetectKrb5ErrCodeRegister(void)
 {
-    sigmatch_table[DETECT_KRB5_ERRCODE].name = "krb5_err_code";
-    sigmatch_table[DETECT_KRB5_ERRCODE].desc = "match Kerberos 5 error code";
-    sigmatch_table[DETECT_KRB5_ERRCODE].url = "/rules/kerberos-keywords.html#krb5-err-code";
-    sigmatch_table[DETECT_KRB5_ERRCODE].Match = NULL;
-    sigmatch_table[DETECT_KRB5_ERRCODE].AppLayerTxMatch = DetectKrb5ErrCodeMatch;
-    sigmatch_table[DETECT_KRB5_ERRCODE].Setup = DetectKrb5ErrCodeSetup;
-    sigmatch_table[DETECT_KRB5_ERRCODE].Free = DetectKrb5ErrCodeFree;
+    sigmatch_table[DETECT_AL_KRB5_ERRCODE].name = "krb5_err_code";
+    sigmatch_table[DETECT_AL_KRB5_ERRCODE].desc = "match Kerberos 5 error code";
+    sigmatch_table[DETECT_AL_KRB5_ERRCODE].url = "/rules/kerberos-keywords.html#krb5-err-code";
+    sigmatch_table[DETECT_AL_KRB5_ERRCODE].Match = NULL;
+    sigmatch_table[DETECT_AL_KRB5_ERRCODE].AppLayerTxMatch = DetectKrb5ErrCodeMatch;
+    sigmatch_table[DETECT_AL_KRB5_ERRCODE].Setup = DetectKrb5ErrCodeSetup;
+    sigmatch_table[DETECT_AL_KRB5_ERRCODE].Free = DetectKrb5ErrCodeFree;
 #ifdef UNITTESTS
-    sigmatch_table[DETECT_KRB5_ERRCODE].RegisterTests = DetectKrb5ErrCodeRegisterTests;
+    sigmatch_table[DETECT_AL_KRB5_ERRCODE].RegisterTests = DetectKrb5ErrCodeRegisterTests;
 #endif
+    DetectAppLayerInspectEngineRegister("krb5_err_code",
+            ALPROTO_KRB5, SIG_FLAG_TOSERVER, 0,
+            DetectEngineInspectKRB5Generic);
 
-    DetectAppLayerInspectEngineRegister("krb5_err_code", ALPROTO_KRB5, SIG_FLAG_TOSERVER, 0,
-            DetectEngineInspectGenericList, NULL);
-
-    DetectAppLayerInspectEngineRegister("krb5_err_code", ALPROTO_KRB5, SIG_FLAG_TOCLIENT, 0,
-            DetectEngineInspectGenericList, NULL);
+    DetectAppLayerInspectEngineRegister("krb5_err_code",
+            ALPROTO_KRB5, SIG_FLAG_TOCLIENT, 0,
+            DetectEngineInspectKRB5Generic);
 
     /* set up the PCRE for keyword parsing */
     DetectSetupParseRegexes(PARSE_REGEX, &parse_regex);
 
     g_krb5_err_code_list_id = DetectBufferTypeRegister("krb5_err_code");
     SCLogDebug("g_krb5_err_code_list_id %d", g_krb5_err_code_list_id);
+}
+
+static int DetectEngineInspectKRB5Generic(ThreadVars *tv,
+        DetectEngineCtx *de_ctx, DetectEngineThreadCtx *det_ctx,
+        const Signature *s, const SigMatchData *smd,
+        Flow *f, uint8_t flags, void *alstate,
+        void *txv, uint64_t tx_id)
+{
+    return DetectEngineInspectGenericList(tv, de_ctx, det_ctx, s, smd,
+                                          f, flags, alstate, txv, tx_id);
 }
 
 /**
@@ -103,7 +121,7 @@ static int DetectKrb5ErrCodeMatch (DetectEngineThreadCtx *det_ctx,
 
     SCEnter();
 
-    ret = SCKrb5TxGetErrorCode(txv, &err_code);
+    ret = rs_krb5_tx_get_errcode(txv, &err_code);
     if (ret != 0)
         SCReturnInt(0);
 
@@ -125,20 +143,18 @@ static DetectKrb5ErrCodeData *DetectKrb5ErrCodeParse (const char *krb5str)
 {
     DetectKrb5ErrCodeData *krb5d = NULL;
     char arg1[4] = "";
-    int res = 0;
-    size_t pcre2len;
+    int ret = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
 
-    pcre2_match_data *match = NULL;
-    int ret = DetectParsePcreExec(&parse_regex, &match, krb5str, 0, 0);
+    ret = DetectParsePcreExec(&parse_regex, krb5str, 0, 0, ov, MAX_SUBSTRINGS);
     if (ret != 2) {
-        SCLogError("parse error, ret %" PRId32 "", ret);
+        SCLogError(SC_ERR_PCRE_MATCH, "parse error, ret %" PRId32 "", ret);
         goto error;
     }
 
-    pcre2len = sizeof(arg1);
-    res = pcre2_substring_copy_bynumber(match, 1, (PCRE2_UCHAR8 *)arg1, &pcre2len);
+    res = pcre_copy_substring((char *) krb5str, ov, MAX_SUBSTRINGS, 1, arg1, sizeof(arg1));
     if (res < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
         goto error;
     }
 
@@ -149,13 +165,9 @@ static DetectKrb5ErrCodeData *DetectKrb5ErrCodeParse (const char *krb5str)
                          (const char *)arg1) < 0) {
         goto error;
     }
-    pcre2_match_data_free(match);
     return krb5d;
 
 error:
-    if (match) {
-        pcre2_match_data_free(match);
-    }
     if (krb5d)
         SCFree(krb5d);
     return NULL;
@@ -175,24 +187,31 @@ error:
 static int DetectKrb5ErrCodeSetup (DetectEngineCtx *de_ctx, Signature *s, const char *krb5str)
 {
     DetectKrb5ErrCodeData *krb5d = NULL;
+    SigMatch *sm = NULL;
 
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_KRB5) != 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_KRB5) != 0)
         return -1;
 
     krb5d = DetectKrb5ErrCodeParse(krb5str);
     if (krb5d == NULL)
         goto error;
 
-    if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_KRB5_ERRCODE, (SigMatchCtx *)krb5d,
-                g_krb5_err_code_list_id) == NULL) {
+    sm = SigMatchAlloc();
+    if (sm == NULL)
         goto error;
-    }
+
+    sm->type = DETECT_AL_KRB5_ERRCODE;
+    sm->ctx = (void *)krb5d;
+
+    SigMatchAppendSMToList(s, sm, g_krb5_err_code_list_id);
 
     return 0;
 
 error:
     if (krb5d != NULL)
         DetectKrb5ErrCodeFree(de_ctx, krb5d);
+    if (sm != NULL)
+        SCFree(sm);
     return -1;
 }
 

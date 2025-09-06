@@ -15,19 +15,18 @@
  * 02110-1301, USA.
  */
 
-/**
- * \file
- *
- * DNP3 application layer protocol header file
- */
+#ifndef __APP_LAYER_DNP3_H__
+#define __APP_LAYER_DNP3_H__
 
-#ifndef SURICATA_APP_LAYER_DNP3_H
-#define SURICATA_APP_LAYER_DNP3_H
-
-#include "rust.h"
-#if __BYTE_ORDER == __BIG_ENDIAN
+#include "detect-engine-state.h"
+#include "util-hashlist.h"
 #include "util-byte.h"
-#endif
+#include "rust.h"
+
+/**
+ * The maximum size of a DNP3 link PDU.
+ */
+#define DNP3_MAX_LINK_PDU_LEN 292
 
 /* DNP3 application request function codes. */
 #define DNP3_APP_FC_CONFIRM                0x00
@@ -51,7 +50,7 @@
 #define DNP3_APP_FC_STOP_APPLICATION       0x12
 #define DNP3_APP_FC_SAVE_CONFIGURATION     0x13
 #define DNP3_APP_FC_ENABLE_UNSOLICITED     0x14
-#define DNP3_APP_FC_DISABLE_UNSOLICITED    0x15
+#define DNP3_APP_FC_DISABLE_UNSOLICTED     0x15
 #define DNP3_APP_FC_ASSIGN_CLASS           0x16
 #define DNP3_APP_FC_DELAY_MEASUREMENT      0x17
 #define DNP3_APP_FC_RECORD_CURRENT_TIME    0x18
@@ -212,20 +211,41 @@ typedef struct DNP3Transaction_ {
     AppLayerTxData         tx_data;
 
     uint64_t tx_num; /**< Internal transaction ID. */
-    bool is_request; /**< Is this tx a request? */
 
     struct DNP3State_ *dnp3;
 
-    uint8_t *buffer; /**< Reassembled request buffer. */
-    uint32_t buffer_len;
-    DNP3ObjectList objects;
-    DNP3LinkHeader lh;
-    DNP3TransportHeader th;
-    DNP3ApplicationHeader ah;
-    DNP3InternalInd iin;
-    uint8_t done;
-    uint8_t complete; /**< Was the decode complete.  It will not be
-                         complete if we hit objects we do not know. */
+    uint8_t                has_request;
+    uint8_t                request_done;
+    DNP3LinkHeader         request_lh;
+    DNP3TransportHeader    request_th;
+    DNP3ApplicationHeader  request_ah;
+    uint8_t               *request_buffer; /**< Reassembled request
+                                            * buffer. */
+    uint32_t               request_buffer_len;
+    uint8_t                request_complete; /**< Was the decode
+                                        * complete.  It will not be
+                                        * complete if we hit objects
+                                        * we do not know. */
+    DNP3ObjectList         request_objects;
+
+    uint8_t                has_response;
+    uint8_t                response_done;
+    DNP3LinkHeader         response_lh;
+    DNP3TransportHeader    response_th;
+    DNP3ApplicationHeader  response_ah;
+    DNP3InternalInd        response_iin;
+    uint8_t               *response_buffer; /**< Reassembed response
+                                             * buffer. */
+    uint32_t               response_buffer_len;
+    uint8_t                response_complete; /**< Was the decode
+                                         * complete.  It will not be
+                                         * complete if we hit objects
+                                         * we do not know. */
+    DNP3ObjectList         response_objects;
+
+    AppLayerDecoderEvents *decoder_events; /**< Per transcation
+                                            * decoder events. */
+    DetectEngineState *de_state;
 
     TAILQ_ENTRY(DNP3Transaction_) next;
 } DNP3Transaction;
@@ -236,7 +256,6 @@ TAILQ_HEAD(TxListHead, DNP3Transaction_);
  * \brief Per flow DNP3 state.
  */
 typedef struct DNP3State_ {
-    AppLayerStateData state_data;
     TAILQ_HEAD(, DNP3Transaction_) tx_list;
     DNP3Transaction *curr;     /**< Current transaction. */
     uint64_t transaction_max;
@@ -257,4 +276,4 @@ void RegisterDNP3Parsers(void);
 void DNP3ParserRegisterTests(void);
 int DNP3PrefixIsSize(uint8_t);
 
-#endif /* SURICATA_APP_LAYER_DNP3_H */
+#endif /* __APP_LAYER_DNP3_H__ */

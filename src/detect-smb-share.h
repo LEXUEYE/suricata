@@ -21,10 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_SMB_NAMED_PIPE_H
-#define SURICATA_DETECT_SMB_NAMED_PIPE_H
+#ifndef __DETECT_SMB_NAMED_PIPE_H__
+#define __DETECT_SMB_NAMED_PIPE_H__
 
 void DetectSmbNamedPipeRegister(void);
 void DetectSmbShareRegister(void);
 
-#endif /* SURICATA_DETECT_SMB_NAMED_PIPE_H */
+#endif /* __DETECT_SMB_NAMED_PIPE_H__ */

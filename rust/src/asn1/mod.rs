@@ -15,10 +15,7 @@
  * 02110-1301, USA.
  */
 
-//! ASN.1 parser module.
-
-use der_parser::ber::{parse_ber_recursive, BerObject, BerObjectContent, Tag};
-use nom7::Err;
+use der_parser::ber::{parse_ber_recursive, BerObject, BerObjectContent, BerTag};
 use std::convert::TryFrom;
 
 mod parse_rules;
@@ -33,7 +30,7 @@ pub struct Asn1<'a>(Vec<BerObject<'a>>);
 enum Asn1DecodeError {
     InvalidKeywordParameter,
     MaxFrames,
-    BerError,
+    BerError(nom::Err<der_parser::error::BerError>),
 }
 
 /// Enumeration of Asn1 checks
@@ -86,13 +83,10 @@ impl<'a> Asn1<'a> {
 
     /// Checks a BerObject and subnodes against the Asn1 checks
     fn check_object(obj: &BerObject, ad: &DetectAsn1Data) -> Option<Asn1Check> {
-        // get length
-        // Note that if length is indefinite (BER), this will return None
-        let len = obj.header.length().definite().ok()?;
         // oversize_length will check if a node has a length greater than
         // the user supplied length
         if let Some(oversize_length) = ad.oversize_length {
-            if len > oversize_length as usize
+            if obj.header.len > oversize_length as u64
                 || obj.content.as_slice().unwrap_or(&[]).len() > oversize_length as usize
             {
                 return Some(Asn1Check::OversizeLength);
@@ -103,12 +97,12 @@ impl<'a> Asn1<'a> {
         // to ignore is greater than the length decoded (in bits)
         if ad.bitstring_overflow
             && (obj.header.is_universal()
-                && obj.header.tag() == Tag::BitString
+                && obj.header.tag == BerTag::BitString
                 && obj.header.is_primitive())
         {
             if let BerObjectContent::BitString(bits, _v) = &obj.content {
-                if len > 0
-                    && *bits as usize > len.saturating_mul(8)
+                if obj.header.len > 0
+                    && *bits as u64 > (obj.header.len.checked_mul(8).unwrap_or(std::u64::MAX))
                 {
                     return Some(Asn1Check::BitstringOverflow);
                 }
@@ -120,14 +114,14 @@ impl<'a> Asn1<'a> {
         // and the buffer is greater than 256, the array is overflown
         if ad.double_overflow
             && (obj.header.is_universal()
-                && obj.header.tag() == Tag::RealType
+                && obj.header.tag == BerTag::RealType
                 && obj.header.is_primitive())
         {
             if let Ok(data) = obj.content.as_slice() {
-                if len > 0
+                if obj.header.len > 0
                     && !data.is_empty()
                     && data[0] & 0xC0 == 0
-                    && (len > 256 || data.len() > 256)
+                    && (obj.header.len > 256 || data.len() > 256)
                 {
                     return Some(Asn1Check::DoubleOverflow);
                 }
@@ -215,10 +209,10 @@ fn asn1_decode<'a>(
 /// # Safety
 ///
 /// input must be a valid buffer of at least input_len bytes
-/// pointer must be freed using `SCAsn1Free`
+/// pointer must be freed using `rs_asn1_free`
 #[no_mangle]
-pub unsafe extern "C" fn SCAsn1Decode(
-    input: *const u8, input_len: u32, buffer_offset: u32, ad_ptr: *const DetectAsn1Data,
+pub extern "C" fn rs_asn1_decode(
+    input: *const u8, input_len: u16, buffer_offset: u32, ad_ptr: *const DetectAsn1Data,
 ) -> *mut Asn1<'static> {
     if input.is_null() || input_len == 0 || ad_ptr.is_null() {
         return std::ptr::null_mut();
@@ -226,7 +220,7 @@ pub unsafe extern "C" fn SCAsn1Decode(
 
     let slice = build_slice!(input, input_len as usize);
 
-    let ad = &*ad_ptr ;
+    let ad = unsafe { &*ad_ptr };
 
     let res = asn1_decode(slice, buffer_offset, ad);
 
@@ -240,9 +234,9 @@ pub unsafe extern "C" fn SCAsn1Decode(
 ///
 /// # Safety
 ///
-/// ptr must be a valid object obtained using `SCAsn1Decode`
+/// ptr must be a valid object obtained using `rs_asn1_decode`
 #[no_mangle]
-pub unsafe extern "C" fn SCAsn1Free(ptr: *mut Asn1) {
+pub unsafe extern "C" fn rs_asn1_free(ptr: *mut Asn1) {
     if ptr.is_null() {
         return;
     }
@@ -256,12 +250,12 @@ pub unsafe extern "C" fn SCAsn1Free(ptr: *mut Asn1) {
 ///
 /// # Safety
 ///
-/// ptr must be a valid object obtained using `SCAsn1Decode`
-/// ad_ptr must be a valid object obtained using `SCAsn1DetectParse`
+/// ptr must be a valid object obtained using `rs_asn1_decode`
+/// ad_ptr must be a valid object obtained using `rs_detect_asn1_parse`
 ///
 /// Returns 1 if any of the options match, 0 if not
 #[no_mangle]
-pub unsafe extern "C" fn SCAsn1Checks(ptr: *const Asn1, ad_ptr: *const DetectAsn1Data) -> u8 {
+pub unsafe extern "C" fn rs_asn1_checks(ptr: *const Asn1, ad_ptr: *const DetectAsn1Data) -> u8 {
     if ptr.is_null() || ad_ptr.is_null() {
         return 0;
     }
@@ -281,9 +275,9 @@ impl From<std::num::TryFromIntError> for Asn1DecodeError {
     }
 }
 
-impl From<Err<der_parser::error::BerError>> for Asn1DecodeError {
-    fn from(_e: Err<der_parser::error::BerError>) -> Asn1DecodeError {
-        Asn1DecodeError::BerError
+impl From<nom::Err<der_parser::error::BerError>> for Asn1DecodeError {
+    fn from(e: nom::Err<der_parser::error::BerError>) -> Asn1DecodeError {
+        Asn1DecodeError::BerError(e)
     }
 }
 

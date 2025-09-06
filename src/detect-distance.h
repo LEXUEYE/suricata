@@ -21,10 +21,11 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_DISTANCE_H
-#define SURICATA_DETECT_DISTANCE_H
+#ifndef __DETECT_DISTANCE_H__
+#define __DETECT_DISTANCE_H__
 
 /* prototypes */
 void DetectDistanceRegister (void);
 
-#endif /* SURICATA_DETECT_DISTANCE_H */
+#endif /* __DETECT_DISTANCE_H__ */
+

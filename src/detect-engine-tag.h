@@ -24,17 +24,18 @@
  * tag keyword
  */
 
-#ifndef SURICATA_DETECT_ENGINE_TAG_H
-#define SURICATA_DETECT_ENGINE_TAG_H
+#ifndef __DETECT_ENGINE_TAG_H__
+#define __DETECT_ENGINE_TAG_H__
 
 #include "host.h"
 #include "detect.h"
-#include "detect-tag.h"
 
-/* This limit should be overwritten/predefined at the config file
+/* This limit should be overwriten/predefined at the config file
  * to limit the options to prevent possible DOS situations. We should also
  * create a limit for bytes and a limit for number of packets */
 #define TAG_MAX_LAST_TIME_SEEN 600
+
+#define TAG_TIMEOUT_CHECK_INTERVAL 60
 
 /* Used for tagged data (sid and gid of the packets that
  * follow the one that triggered the rule with tag option) */
@@ -44,15 +45,19 @@
 int TagHashAddTag(DetectTagDataEntry *, Packet *);
 int TagFlowAdd(Packet *, DetectTagDataEntry *);
 
-void TagHandlePacket(const DetectEngineCtx *, DetectEngineThreadCtx *, Packet *);
+void TagContextDestroy(void);
+void TagHandlePacket(DetectEngineCtx *, DetectEngineThreadCtx *, Packet *);
 
 void TagInitCtx(void);
 void TagDestroyCtx(void);
+void TagRestartCtx(void);
 
-int TagTimeoutCheck(Host *, SCTime_t);
+int TagTimeoutCheck(Host *, struct timeval *);
 
 int TagHostHasTag(Host *host);
 
 void DetectEngineTagRegisterTests(void);
 
-#endif /* SURICATA_DETECT_ENGINE_TAG_H */
+#endif /* __DETECT_ENGINE_TAG_H__ */
+
+

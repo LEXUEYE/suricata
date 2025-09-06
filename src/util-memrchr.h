@@ -20,11 +20,11 @@
  *
  */
 
-#ifndef SURICATA_UTIL_MEMRCHR_H
-#define SURICATA_UTIL_MEMRCHR_H
+#ifndef __UTIL_MEMRCHR_H__
+#define __UTIL_MEMRCHR_H__
 
 void *memrchr(const void *s, int c, size_t n);
 
 void MemrchrRegisterTests(void);
 
-#endif /* SURICATA_UTIL_MEMRCHR_H */
+#endif /* __UTIL_MEMRCHR_H__ */

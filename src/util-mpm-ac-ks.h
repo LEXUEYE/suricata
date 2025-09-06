@@ -23,8 +23,8 @@
  *
  */
 
-#ifndef SURICATA_UTIL_MPM_AC_KS__H
-#define SURICATA_UTIL_MPM_AC_KS__H
+#ifndef __UTIL_MPM_AC_KS__H__
+#define __UTIL_MPM_AC_KS__H__
 
 typedef struct SCACTilePatternList_ {
     uint8_t *cs;
@@ -145,6 +145,14 @@ typedef struct SCACTileSearchCtx_ {
 
 } SCACTileSearchCtx;
 
+
+typedef struct SCACTileThreadCtx_ {
+    /* the total calls we make to the search function */
+    uint32_t total_calls;
+    /* the total patterns that we ended up matching against */
+    uint64_t total_matches;
+} SCACTileThreadCtx;
+
 void MpmACTileRegister(void);
 
-#endif /* SURICATA_UTIL_MPM_AC_KS__H */
+#endif /* __UTIL_MPM_AC_KS__H__ */

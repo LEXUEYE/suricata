@@ -41,17 +41,13 @@
 #include "detect-engine.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-sigorder.h"
-#include "detect-engine-build.h"
 
 #include "pkt-var.h"
 #include "host.h"
 #include "util-profiling.h"
 
 /*                         name             modifiers          value      */
-#define PARSE_REGEX                                                                                \
-    "^\\s*([a-zA-Z][\\w\\d_./"                                                                     \
-    "]+)\\s*,\\s*([+=-]{1}|==|!=|<|<=|>|>=|isset|notset|isnotset)\\s*,?\\s*([a-zA-Z][\\w\\d]+|["   \
-    "\\d]{1,10})?\\s*$"
+#define PARSE_REGEX "^\\s*([a-zA-Z][\\w\\d_./]+)\\s*,\\s*([+=-]{1}|==|!=|<|<=|>|>=|isset|notset)\\s*,?\\s*([a-zA-Z][\\w\\d]+|[\\d]{1,10})?\\s*$"
 /* Varnames must begin with a letter */
 
 static DetectParseRegex parse_regex;
@@ -89,7 +85,7 @@ void DetectFlowintRegister(void)
  * \param m pointer to the sigmatch that we will cast into DetectFlowintData
  *
  * \retval 0 no match, when a var doesn't exist
- * \retval 1 match, when a var is initialized well, add/subtracted, or a true
+ * \retval 1 match, when a var is initialized well, add/substracted, or a true
  * condition
  */
 int DetectFlowintMatch(DetectEngineThreadCtx *det_ctx,
@@ -143,7 +139,7 @@ int DetectFlowintMatch(DetectEngineThreadCtx *det_ctx,
         goto end;
     }
 
-    if (sfd->modifier == FLOWINT_MODIFIER_ISNOTSET) {
+    if (sfd->modifier == FLOWINT_MODIFIER_NOTSET) {
         SCLogDebug(" Not set %s? = %u", sfd->name,(fv) ? 0 : 1);
         if (fv == NULL)
             ret = 1;
@@ -160,7 +156,7 @@ int DetectFlowintMatch(DetectEngineThreadCtx *det_ctx,
         }
 
         if (sfd->modifier == FLOWINT_MODIFIER_SUB) {
-            SCLogDebug("Subtracting %u to %s", targetval, sfd->name);
+            SCLogDebug("Substracting %u to %s", targetval, sfd->name);
             FlowVarAddIntNoLock(p->flow, sfd->idx, fv->data.fv_int.value -
                            targetval);
             ret = 1;
@@ -233,30 +229,29 @@ static DetectFlowintData *DetectFlowintParse(DetectEngineCtx *de_ctx, const char
     char *varname = NULL;
     char *varval = NULL;
     char *modstr = NULL;
-    int res = 0;
-    size_t pcre2_len;
+    int ret = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
     uint8_t modifier = FLOWINT_MODIFIER_UNKNOWN;
     unsigned long long value_long = 0;
     const char *str_ptr;
-    pcre2_match_data *match = NULL;
 
-    int ret = DetectParsePcreExec(&parse_regex, &match, rawstr, 0, 0);
+    ret = DetectParsePcreExec(&parse_regex, rawstr, 0, 0, ov, MAX_SUBSTRINGS);
     if (ret < 3 || ret > 4) {
-        SCLogError("\"%s\" is not a valid setting for flowint(ret = %d).", rawstr, ret);
-        goto error;
+        SCLogError(SC_ERR_PCRE_MATCH, "\"%s\" is not a valid setting for flowint(ret = %d).", rawstr, ret);
+        return NULL;
     }
 
     /* Get our flowint varname */
-    res = pcre2_substring_get_bynumber(match, 1, (PCRE2_UCHAR8 **)&str_ptr, &pcre2_len);
+    res = pcre_get_substring((char *) rawstr, ov, MAX_SUBSTRINGS, 1, &str_ptr);
     if (res < 0 || str_ptr == NULL) {
-        SCLogError("pcre2_substring_get_bynumber failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
         goto error;
     }
     varname = (char *)str_ptr;
 
-    res = pcre2_substring_get_bynumber(match, 2, (PCRE2_UCHAR8 **)&str_ptr, &pcre2_len);
+    res = pcre_get_substring((char *) rawstr, ov, MAX_SUBSTRINGS, 2, &str_ptr);
     if (res < 0 || str_ptr == NULL) {
-        SCLogError("pcre2_substring_get_bynumber failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
         goto error;
     }
     modstr = (char *)str_ptr;
@@ -283,11 +278,11 @@ static DetectFlowintData *DetectFlowintParse(DetectEngineCtx *de_ctx, const char
         modifier = FLOWINT_MODIFIER_GT;
     if (strcmp("isset", modstr) == 0)
         modifier = FLOWINT_MODIFIER_ISSET;
-    if (strcmp("notset", modstr) == 0 || strcmp("isnotset", modstr) == 0)
-        modifier = FLOWINT_MODIFIER_ISNOTSET;
+    if (strcmp("notset", modstr) == 0)
+        modifier = FLOWINT_MODIFIER_NOTSET;
 
     if (modifier == FLOWINT_MODIFIER_UNKNOWN) {
-        SCLogError("Unknown modifier");
+        SCLogError(SC_ERR_UNKNOWN_VALUE, "Unknown modifier");
         goto error;
     }
 
@@ -296,14 +291,14 @@ static DetectFlowintData *DetectFlowintParse(DetectEngineCtx *de_ctx, const char
         goto error;
 
     /* If we need another arg, check it out(isset doesn't need another arg) */
-    if (modifier != FLOWINT_MODIFIER_ISSET && modifier != FLOWINT_MODIFIER_ISNOTSET) {
+    if (modifier != FLOWINT_MODIFIER_ISSET && modifier != FLOWINT_MODIFIER_NOTSET) {
         if (ret < 4)
             goto error;
 
-        res = pcre2_substring_get_bynumber(match, 3, (PCRE2_UCHAR8 **)&str_ptr, &pcre2_len);
+        res = pcre_get_substring((char *) rawstr, ov, MAX_SUBSTRINGS, 3, &str_ptr);
         varval = (char *)str_ptr;
         if (res < 0 || varval == NULL || strcmp(varval, "") == 0) {
-            SCLogError("pcre2_substring_get_bynumber failed");
+            SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
             goto error;
         }
 
@@ -320,7 +315,7 @@ static DetectFlowintData *DetectFlowintParse(DetectEngineCtx *de_ctx, const char
             sfd->targettype = FLOWINT_TARGET_VAR;
             sfd->target.tvar.name = SCStrdup(varval);
             if (unlikely(sfd->target.tvar.name == NULL)) {
-                SCLogError("malloc from strdup failed");
+                SCLogError(SC_ERR_MEM_ALLOC, "malloc from strdup failed");
                 goto error;
             }
         }
@@ -331,29 +326,25 @@ static DetectFlowintData *DetectFlowintParse(DetectEngineCtx *de_ctx, const char
     /* Set the name of the origin var to modify/compared with the target */
     sfd->name = SCStrdup(varname);
     if (unlikely(sfd->name == NULL)) {
-        SCLogError("malloc from strdup failed");
+        SCLogError(SC_ERR_MEM_ALLOC, "malloc from strdup failed");
         goto error;
     }
-    sfd->idx = VarNameStoreRegister(varname, VAR_TYPE_FLOW_INT);
+    sfd->idx = VarNameStoreSetupAdd(varname, VAR_TYPE_FLOW_INT);
     SCLogDebug("sfd->name %s id %u", sfd->name, sfd->idx);
     sfd->modifier = modifier;
 
-    pcre2_substring_free((PCRE2_UCHAR *)varname);
-    pcre2_substring_free((PCRE2_UCHAR *)modstr);
+    pcre_free_substring(varname);
+    pcre_free_substring(modstr);
     if (varval)
-        pcre2_substring_free((PCRE2_UCHAR *)varval);
-    pcre2_match_data_free(match);
+        pcre_free_substring(varval);
     return sfd;
 error:
-    if (match) {
-        pcre2_match_data_free(match);
-    }
     if (varname)
-        pcre2_substring_free((PCRE2_UCHAR *)varname);
+        pcre_free_substring(varname);
     if (varval)
-        pcre2_substring_free((PCRE2_UCHAR *)varval);
+        pcre_free_substring(varval);
     if (modstr)
-        pcre2_substring_free((PCRE2_UCHAR *)modstr);
+        pcre_free_substring(modstr);
     if (sfd != NULL)
         SCFree(sfd);
     return NULL;
@@ -372,6 +363,7 @@ error:
 static int DetectFlowintSetup(DetectEngineCtx *de_ctx, Signature *s, const char *rawstr)
 {
     DetectFlowintData *sfd = NULL;
+    SigMatch *sm = NULL;
 
     sfd = DetectFlowintParse(de_ctx, rawstr);
     if (sfd == NULL)
@@ -379,15 +371,18 @@ static int DetectFlowintSetup(DetectEngineCtx *de_ctx, Signature *s, const char 
 
     /* Okay so far so good, lets get this into a SigMatch
      * and put it in the Signature. */
+    sm = SigMatchAlloc();
+    if (sm == NULL)
+        goto error;
+
+    sm->type = DETECT_FLOWINT;
+    sm->ctx = (SigMatchCtx *)sfd;
 
     switch (sfd->modifier) {
         case FLOWINT_MODIFIER_SET:
         case FLOWINT_MODIFIER_ADD:
         case FLOWINT_MODIFIER_SUB:
-            if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_FLOWINT, (SigMatchCtx *)sfd,
-                        DETECT_SM_LIST_POSTMATCH) == NULL) {
-                goto error;
-            }
+            SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_POSTMATCH);
             break;
 
         case FLOWINT_MODIFIER_LT:
@@ -397,11 +392,8 @@ static int DetectFlowintSetup(DetectEngineCtx *de_ctx, Signature *s, const char 
         case FLOWINT_MODIFIER_GE:
         case FLOWINT_MODIFIER_GT:
         case FLOWINT_MODIFIER_ISSET:
-        case FLOWINT_MODIFIER_ISNOTSET:
-            if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_FLOWINT, (SigMatchCtx *)sfd,
-                        DETECT_SM_LIST_MATCH) == NULL) {
-                goto error;
-            }
+        case FLOWINT_MODIFIER_NOTSET:
+            SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_MATCH);
             break;
         default:
             goto error;
@@ -412,6 +404,8 @@ static int DetectFlowintSetup(DetectEngineCtx *de_ctx, Signature *s, const char 
 error:
     if (sfd)
         DetectFlowintFree(de_ctx, sfd);
+    if (sm)
+        SCFree(sm);
     return -1;
 }
 
@@ -422,7 +416,6 @@ void DetectFlowintFree(DetectEngineCtx *de_ctx, void *tmp)
 {
     DetectFlowintData *sfd =(DetectFlowintData*) tmp;
     if (sfd != NULL) {
-        VarNameStoreUnregister(sfd->idx, VAR_TYPE_FLOW_INT);
         if (sfd->name != NULL)
             SCFree(sfd->name);
         if (sfd->targettype == FLOWINT_TARGET_VAR)
@@ -433,9 +426,8 @@ void DetectFlowintFree(DetectEngineCtx *de_ctx, void *tmp)
 }
 
 #ifdef UNITTESTS
-#include "detect-engine-alert.h"
 /**
- * \brief This is a helper function used for debugging purposes
+ * \brief This is a helper funtion used for debugging purposes
  */
 static void DetectFlowintPrintData(DetectFlowintData *sfd)
 {
@@ -690,7 +682,7 @@ static int DetectFlowintTestParseVar04(void)
 
 /**
  * \test DetectFlowintTestParseVal05 is a test to make sure that we set the
- *  DetectFlowint correctly for checking if not equal to a valid target value
+ *  DetectFlowint correctly for cheking if not equal to a valid target value
  */
 static int DetectFlowintTestParseVal05(void)
 {
@@ -747,7 +739,7 @@ static int DetectFlowintTestParseVar05(void)
 
 /**
  * \test DetectFlowintTestParseVal06 is a test to make sure that we set the
- *  DetectFlowint correctly for checking if greater than a valid target value
+ *  DetectFlowint correctly for cheking if greater than a valid target value
  */
 static int DetectFlowintTestParseVal06(void)
 {
@@ -804,7 +796,7 @@ static int DetectFlowintTestParseVar06(void)
 
 /**
  * \test DetectFlowintTestParseVal07 is a test to make sure that we set the
- *  DetectFlowint correctly for checking if greater or equal than a valid target value
+ *  DetectFlowint correctly for cheking if greater or equal than a valid target value
  */
 static int DetectFlowintTestParseVal07(void)
 {
@@ -861,7 +853,7 @@ static int DetectFlowintTestParseVar07(void)
 
 /**
  * \test DetectFlowintTestParseVal08 is a test to make sure that we set the
- *  DetectFlowint correctly for checking if lower or equal than a valid target value
+ *  DetectFlowint correctly for cheking if lower or equal than a valid target value
  */
 static int DetectFlowintTestParseVal08(void)
 {
@@ -918,7 +910,7 @@ static int DetectFlowintTestParseVar08(void)
 
 /**
  * \test DetectFlowintTestParseVal09 is a test to make sure that we set the
- *  DetectFlowint correctly for checking if lower than a valid target value
+ *  DetectFlowint correctly for cheking if lower than a valid target value
  */
 static int DetectFlowintTestParseVal09(void)
 {
@@ -1001,8 +993,9 @@ static int DetectFlowintTestParseIsset10(void)
     if (sfd) DetectFlowintFree(NULL, sfd);
     sfd = DetectFlowintParse(de_ctx, "myvar, notset");
     DetectFlowintPrintData(sfd);
-    if (sfd != NULL && !strcmp(sfd->name, "myvar") && sfd->targettype == FLOWINT_TARGET_SELF &&
-            sfd->modifier == FLOWINT_MODIFIER_ISNOTSET) {
+    if (sfd != NULL && !strcmp(sfd->name, "myvar")
+            && sfd->targettype == FLOWINT_TARGET_SELF
+            && sfd->modifier == FLOWINT_MODIFIER_NOTSET) {
 
         result &= 1;
     } else {
@@ -1101,7 +1094,7 @@ error:
  *        and when that counter reach 6 packets.
  *
  *        All the Signatures generate an alert(its for testing)
- *        but the signature that increment the second counter +1, that has
+ *        but the ignature that increment the second counter +1, that has
  *        a "noalert", so we can do all increments
  *        silently until we reach 6 next packets counted
  */
@@ -1191,9 +1184,7 @@ static int DetectFlowintTestPacket02Real(void)
     de_ctx->flags |= DE_QUIET;
 
     const char *sigs[5];
-    sigs[0] = "alert tcp any any -> any any (msg:\"Setting a flowint counter\"; content:\"GET\"; "
-              "flowint:myvar,notset; flowint:maxvar,isnotset; flowint: myvar,=,1; flowint: "
-              "maxvar,=,6; sid:101;)";
+    sigs[0] = "alert tcp any any -> any any (msg:\"Setting a flowint counter\"; content:\"GET\"; flowint: myvar, notset; flowint:maxvar,notset; flowint: myvar,=,1; flowint: maxvar,=,6; sid:101;)";
     sigs[1] = "alert tcp any any -> any any (msg:\"Adding to flowint counter\"; content:\"Unauthorized\"; flowint:myvar,isset; flowint: myvar,+,2; sid:102;)";
     sigs[2] = "alert tcp any any -> any any (msg:\"if the flowint counter is 3 create a new counter\"; content:\"Unauthorized\"; flowint: myvar, isset; flowint: myvar,==,3; flowint:cntpackets,notset; flowint: cntpackets, =, 0; sid:103;)";
     sigs[3] = "alert tcp any any -> any any (msg:\"and count the rest of the packets received without generating alerts!!!\"; flowint: cntpackets,isset; flowint: cntpackets, +, 1; noalert;sid:104;)";

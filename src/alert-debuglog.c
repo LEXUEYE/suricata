@@ -24,6 +24,7 @@
 #include "suricata-common.h"
 #include "suricata.h"
 
+#include "debug.h"
 #include "detect.h"
 #include "flow.h"
 #include "conf.h"
@@ -41,7 +42,6 @@
 #include "util-unittest.h"
 
 #include "util-debug.h"
-#include "util-validate.h"
 #include "util-buffer.h"
 
 #include "output.h"
@@ -67,9 +67,9 @@ typedef struct AlertDebugLogThread_ {
 } AlertDebugLogThread;
 
 /**
- *  \brief Function to log the FlowVars into alert-debug.log
+ *  \brief Function to log the FlowVars in to alert-debug.log
  *
- *  \param aft Pointer to AlertDebugLog Thread
+ *  \param aft Pointer to AltertDebugLog Thread
  *  \param p Pointer to the packet
  *
  */
@@ -115,9 +115,9 @@ static void AlertDebugLogFlowVars(AlertDebugLogThread *aft, const Packet *p)
 }
 
 /**
- *  \brief Function to log the PktVars into alert-debug.log
+ *  \brief Function to log the PktVars in to alert-debug.log
  *
- *  \param aft Pointer to AlertDebugLog Thread
+ *  \param aft Pointer to AltertDebugLog Thread
  *  \param p Pointer to the packet
  *
  */
@@ -136,8 +136,7 @@ static void AlertDebugLogPktVars(AlertDebugLogThread *aft, const Packet *p)
 
 /** \todo doc
  * assume we have aft lock */
-static int AlertDebugPrintStreamSegmentCallback(
-        const Packet *p, TcpSegment *seg, void *data, const uint8_t *buf, uint32_t buflen)
+static int AlertDebugPrintStreamSegmentCallback(const Packet *p, void *data, const uint8_t *buf, uint32_t buflen)
 {
     AlertDebugLogThread *aft = (AlertDebugLogThread *)data;
 
@@ -162,7 +161,7 @@ static TmEcode AlertDebugLogger(ThreadVars *tv, const Packet *p, void *thread_da
 
     MemBufferReset(aft->buffer);
 
-    CreateTimeString(p->ts, timebuf, sizeof(timebuf));
+    CreateTimeString(&p->ts, timebuf, sizeof(timebuf));
 
     MemBufferWriteString(aft->buffer, "+================\n"
                          "TIME:              %s\n", timebuf);
@@ -173,11 +172,10 @@ static TmEcode AlertDebugLogger(ThreadVars *tv, const Packet *p, void *thread_da
     MemBufferWriteString(aft->buffer, "PKT SRC:           %s\n", pkt_src_str);
 
     char srcip[46], dstip[46];
-    if (PacketIsIPv4(p)) {
+    if (PKT_IS_IPV4(p)) {
         PrintInet(AF_INET, (const void *)GET_IPV4_SRC_ADDR_PTR(p), srcip, sizeof(srcip));
         PrintInet(AF_INET, (const void *)GET_IPV4_DST_ADDR_PTR(p), dstip, sizeof(dstip));
-    } else {
-        DEBUG_VALIDATE_BUG_ON(!(PacketIsIPv6(p)));
+    } else if (PKT_IS_IPV6(p)) {
         PrintInet(AF_INET6, (const void *)GET_IPV6_SRC_ADDR(p), srcip, sizeof(srcip));
         PrintInet(AF_INET6, (const void *)GET_IPV6_DST_ADDR(p), dstip, sizeof(dstip));
     }
@@ -186,16 +184,14 @@ static TmEcode AlertDebugLogger(ThreadVars *tv, const Packet *p, void *thread_da
                          "DST IP:            %s\n"
                          "PROTO:             %" PRIu32 "\n",
                          srcip, dstip, p->proto);
-    if (PacketIsTCP(p) || PacketIsUDP(p)) {
+    if (PKT_IS_TCP(p) || PKT_IS_UDP(p)) {
         MemBufferWriteString(aft->buffer, "SRC PORT:          %" PRIu32 "\n"
                              "DST PORT:          %" PRIu32 "\n",
                              p->sp, p->dp);
-        if (PacketIsTCP(p)) {
-            const TCPHdr *tcph = PacketGetTCP(p);
-            MemBufferWriteString(aft->buffer,
-                    "TCP SEQ:           %" PRIu32 "\n"
-                    "TCP ACK:           %" PRIu32 "\n",
-                    TCP_GET_RAW_SEQ(tcph), TCP_GET_RAW_ACK(tcph));
+        if (PKT_IS_TCP(p)) {
+            MemBufferWriteString(aft->buffer, "TCP SEQ:           %"PRIu32"\n"
+                                 "TCP ACK:           %"PRIu32"\n",
+                                 TCP_GET_SEQ(p), TCP_GET_ACK(p));
         }
     }
 
@@ -208,7 +204,7 @@ static TmEcode AlertDebugLogger(ThreadVars *tv, const Packet *p, void *thread_da
     if (p->flow != NULL) {
         int applayer = 0;
         applayer = StreamTcpAppLayerIsDisabled(p->flow);
-        CreateTimeString(p->flow->startts, timebuf, sizeof(timebuf));
+        CreateTimeString(&p->flow->startts, timebuf, sizeof(timebuf));
         MemBufferWriteString(aft->buffer, "FLOW Start TS:     %s\n", timebuf);
         MemBufferWriteString(aft->buffer, "FLOW PKTS TODST:   %"PRIu32"\n"
                              "FLOW PKTS TOSRC:   %"PRIu32"\n"
@@ -216,13 +212,17 @@ static TmEcode AlertDebugLogger(ThreadVars *tv, const Packet *p, void *thread_da
                              p->flow->todstpktcnt, p->flow->tosrcpktcnt,
                              p->flow->todstbytecnt + p->flow->tosrcbytecnt);
         MemBufferWriteString(aft->buffer,
-                "FLOW ACTION:       DROP: %s\n"
-                "FLOW PAYLOAD: %s, APP_LAYER: %s\n"
-                "FLOW APP_LAYER:    DETECTED: %s, PROTO %" PRIu16 "\n",
-                p->flow->flags & FLOW_ACTION_DROP ? "TRUE" : "FALSE",
-                p->flow->flags & FLOW_NOPAYLOAD_INSPECTION ? "TRUE" : "FALSE",
-                applayer ? "TRUE" : "FALSE",
-                (p->flow->alproto != ALPROTO_UNKNOWN) ? "TRUE" : "FALSE", p->flow->alproto);
+                             "FLOW IPONLY SET:   TOSERVER: %s, TOCLIENT: %s\n"
+                             "FLOW ACTION:       DROP: %s\n"
+                             "FLOW NOINSPECTION: PACKET: %s, PAYLOAD: %s, APP_LAYER: %s\n"
+                             "FLOW APP_LAYER:    DETECTED: %s, PROTO %"PRIu16"\n",
+                             p->flow->flags & FLOW_TOSERVER_IPONLY_SET ? "TRUE" : "FALSE",
+                             p->flow->flags & FLOW_TOCLIENT_IPONLY_SET ? "TRUE" : "FALSE",
+                             p->flow->flags & FLOW_ACTION_DROP ? "TRUE" : "FALSE",
+                             p->flow->flags & FLOW_NOPACKET_INSPECTION ? "TRUE" : "FALSE",
+                             p->flow->flags & FLOW_NOPAYLOAD_INSPECTION ? "TRUE" : "FALSE",
+                             applayer ? "TRUE" : "FALSE",
+                             (p->flow->alproto != ALPROTO_UNKNOWN) ? "TRUE" : "FALSE", p->flow->alproto);
         AlertDebugLogFlowVars(aft, p);
     }
 
@@ -284,15 +284,16 @@ static TmEcode AlertDebugLogger(ThreadVars *tv, const Packet *p, void *thread_da
             /* This is an app layer or stream alert */
             int ret;
             uint8_t flag;
-            if (!(PacketIsTCP(p)) || p->flow == NULL || p->flow->protoctx == NULL) {
-                continue;
+            if (!(PKT_IS_TCP(p)) || p->flow == NULL ||
+                    p->flow->protoctx == NULL) {
+                return TM_ECODE_OK;
             }
             /* IDS mode reverse the data */
             /** \todo improve the order selection policy */
             if (p->flowflags & FLOW_PKT_TOSERVER) {
-                flag = STREAM_DUMP_TOCLIENT;
+                flag = FLOW_PKT_TOCLIENT;
             } else {
-                flag = STREAM_DUMP_TOSERVER;
+                flag = FLOW_PKT_TOSERVER;
             }
             ret = StreamSegmentForEach((const Packet *)p, flag,
                                  AlertDebugPrintStreamSegmentCallback,
@@ -321,7 +322,7 @@ static TmEcode AlertDebugLogDecoderEvent(ThreadVars *tv, const Packet *p, void *
 
     MemBufferReset(aft->buffer);
 
-    CreateTimeString(p->ts, timebuf, sizeof(timebuf));
+    CreateTimeString(&p->ts, timebuf, sizeof(timebuf));
 
     MemBufferWriteString(aft->buffer,
                          "+================\n"
@@ -371,9 +372,10 @@ static TmEcode AlertDebugLogDecoderEvent(ThreadVars *tv, const Packet *p, void *
 
 static TmEcode AlertDebugLogThreadInit(ThreadVars *t, const void *initdata, void **data)
 {
-    AlertDebugLogThread *aft = SCCalloc(1, sizeof(AlertDebugLogThread));
+    AlertDebugLogThread *aft = SCMalloc(sizeof(AlertDebugLogThread));
     if (unlikely(aft == NULL))
         return TM_ECODE_FAILED;
+    memset(aft, 0, sizeof(AlertDebugLogThread));
 
     if(initdata == NULL)
     {
@@ -381,7 +383,7 @@ static TmEcode AlertDebugLogThreadInit(ThreadVars *t, const void *initdata, void
         SCFree(aft);
         return TM_ECODE_FAILED;
     }
-    /** Use the Output Context (file pointer and mutex) */
+    /** Use the Ouptut Context (file pointer and mutex) */
     aft->file_ctx = ((OutputCtx *)initdata)->data;
 
     /* 1 mb seems sufficient enough */
@@ -424,11 +426,11 @@ static void AlertDebugLogDeInitCtx(OutputCtx *output_ctx)
 /**
  *  \brief Create a new LogFileCtx for alert debug logging.
  *
- *  \param SCConfNode containing configuration for this logger.
+ *  \param ConfNode containing configuration for this logger.
  *
  *  \return output_ctx if succesful, NULL otherwise
  */
-static OutputInitResult AlertDebugLogInitCtx(SCConfNode *conf)
+static OutputInitResult AlertDebugLogInitCtx(ConfNode *conf)
 {
     OutputInitResult result = { NULL, false };
     LogFileCtx *file_ctx = NULL;
@@ -443,10 +445,11 @@ static OutputInitResult AlertDebugLogInitCtx(SCConfNode *conf)
         goto error;
     }
 
-    OutputCtx *output_ctx = SCCalloc(1, sizeof(OutputCtx));
+    OutputCtx *output_ctx = SCMalloc(sizeof(OutputCtx));
     if (unlikely(output_ctx == NULL))
         goto error;
 
+    memset(output_ctx, 0x00, sizeof(OutputCtx));
     output_ctx->data = file_ctx;
     output_ctx->DeInit = AlertDebugLogDeInitCtx;
 
@@ -463,14 +466,14 @@ error:
     return result;
 }
 
-static bool AlertDebugLogCondition(ThreadVars *tv, void *thread_data, const Packet *p)
+static int AlertDebugLogCondition(ThreadVars *tv, const Packet *p)
 {
-    return (p->alerts.cnt > 0);
+    return (p->alerts.cnt ? TRUE : FALSE);
 }
 
 static int AlertDebugLogLogger(ThreadVars *tv, void *thread_data, const Packet *p)
 {
-    if (PacketIsIPv4(p) || PacketIsIPv6(p)) {
+    if (PKT_IS_IPV4(p) || PKT_IS_IPV6(p)) {
         return AlertDebugLogger(tv, p, thread_data);
     } else if (p->events.cnt > 0) {
         return AlertDebugLogDecoderEvent(tv, p, thread_data);
@@ -480,15 +483,7 @@ static int AlertDebugLogLogger(ThreadVars *tv, void *thread_data, const Packet *
 
 void AlertDebugLogRegister(void)
 {
-    OutputPacketLoggerFunctions output_logger_functions = {
-        .LogFunc = AlertDebugLogLogger,
-        .FlushFunc = NULL,
-        .ConditionFunc = AlertDebugLogCondition,
-        .ThreadInitFunc = AlertDebugLogThreadInit,
-        .ThreadDeinitFunc = AlertDebugLogThreadDeinit,
-        .ThreadExitPrintStatsFunc = NULL,
-    };
-
-    OutputRegisterPacketModule(LOGGER_ALERT_DEBUG, MODULE_NAME, "alert-debug", AlertDebugLogInitCtx,
-            &output_logger_functions);
+    OutputRegisterPacketModule(LOGGER_ALERT_DEBUG, MODULE_NAME, "alert-debug",
+        AlertDebugLogInitCtx, AlertDebugLogLogger, AlertDebugLogCondition,
+        AlertDebugLogThreadInit, AlertDebugLogThreadDeinit, NULL);
 }

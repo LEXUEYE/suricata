@@ -5,4 +5,3 @@ Lua support
 
    lua-usage
    lua-functions
-   libs/index

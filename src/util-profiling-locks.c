@@ -26,12 +26,10 @@
 
 #include "suricata-common.h"
 #include "util-profiling-locks.h"
+#include "util-hashlist.h"
 
 #ifdef PROFILING
 #ifdef PROFILE_LOCKING
-#include "threads.h"
-#include "util-hashlist.h"
-#include "util-debug.h"
 
 thread_local ProfilingLock locks[PROFILING_MAX_LOCKS];
 thread_local int locks_idx = 0;
@@ -95,7 +93,7 @@ static void LockRecordFree(void *data)
     SCFree(fn);
 }
 
-int LockRecordInitHash(void)
+int LockRecordInitHash()
 {
     pthread_mutex_init(&lock_records_mutex, NULL);
     pthread_mutex_lock(&lock_records_mutex);
@@ -136,6 +134,8 @@ static void LockRecordAdd(ProfilingLock *l)
         lookup_fn->ticks_cnt++;
         lookup_fn->cont += l->cont;
     }
+
+    return;
 }
 
 /** \param p void ptr to Packet struct */
@@ -161,7 +161,8 @@ static void SCProfilingListLocks(void)
         fp = fopen(profiling_locks_file_name, profiling_locks_file_mode);
 
         if (fp == NULL) {
-            SCLogError("failed to open %s: %s", profiling_locks_file_name, strerror(errno));
+            SCLogError(SC_ERR_FOPEN, "failed to open %s: %s",
+                    profiling_locks_file_name, strerror(errno));
             return;
         }
     } else {
@@ -217,7 +218,7 @@ static void SCProfilingListLocks(void)
     fclose(fp);
 }
 
-void LockRecordFreeHash(void)
+void LockRecordFreeHash()
 {
     if (profiling_locks_enabled == 0)
         return;
@@ -237,3 +238,4 @@ void LockRecordFreeHash(void)
 
 #endif
 #endif
+

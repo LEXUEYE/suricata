@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,8 +21,10 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_MISC_H
-#define SURICATA_UTIL_MISC_H
+#ifndef __UTIL_MISC_H__
+#define __UTIL_MISC_H__
+
+#include "util-error.h"
 
 /**
  * \brief Generic API that can be used by all to log an
@@ -32,11 +34,11 @@
                  etc.
  * \param value Default value to be printed.
  */
-#define WarnInvalidConfEntry(param_name, format, value)                                            \
-    do {                                                                                           \
-        SCLogWarning("Invalid conf entry found for "                                               \
-                     "\"%s\".  Using default value of \"" format "\".",                            \
-                param_name, value);                                                                \
+#define WarnInvalidConfEntry(param_name, format, value) do {            \
+        SCLogWarning(SC_ERR_INVALID_YAML_CONF_ENTRY,                    \
+                     "Invalid conf entry found for "                    \
+                     "\"%s\".  Using default value of \"" format "\".", \
+                     param_name, value);                                \
     } while (0)
 
 /* size string parsing API */
@@ -45,10 +47,7 @@ int ParseSizeStringU8(const char *, uint8_t *);
 int ParseSizeStringU16(const char *, uint16_t *);
 int ParseSizeStringU32(const char *, uint32_t *);
 int ParseSizeStringU64(const char *, uint64_t *);
-
-#ifdef UNITTESTS
 void UtilMiscRegisterTests(void);
-#endif /* UNITTESTS */
 
 void ParseSizeInit(void);
 void ParseSizeDeinit(void);
@@ -56,4 +55,4 @@ void ParseSizeDeinit(void);
 void ShortenString(const char *input,
     char *output, size_t output_size, char c);
 
-#endif /* SURICATA_UTIL_MISC_H */
+#endif /* __UTIL_MISC_H__ */

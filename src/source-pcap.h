@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_SOURCE_PCAP_H
-#define SURICATA_SOURCE_PCAP_H
+#ifndef __SOURCE_PCAP_H__
+#define __SOURCE_PCAP_H__
 
 void TmModuleReceivePcapRegister (void);
 void TmModuleDecodePcapRegister (void);
@@ -59,4 +59,4 @@ typedef struct PcapIfaceConfig_
     void (*DerefFunc)(void *);
 } PcapIfaceConfig;
 
-#endif /* SURICATA_SOURCE_PCAP_H */
+#endif /* __SOURCE_PCAP_H__ */

@@ -25,8 +25,11 @@
  * Implements the nfq_set_mark keyword
  */
 
-#ifndef SURICATA_DETECT_MARK_H
-#define SURICATA_DETECT_MARK_H
+#ifndef __DETECT_MARK_H__
+#define __DETECT_MARK_H__
+
+#include "decode.h"
+#include "detect.h"
 
 /**
  * \struct DetectMarkData_
@@ -49,4 +52,4 @@ typedef struct DetectMarkData_ {
 
 void DetectMarkRegister (void);
 
-#endif /*SURICATA_DETECT_MARK_H */
+#endif /*__DETECT_MARK_H__ */

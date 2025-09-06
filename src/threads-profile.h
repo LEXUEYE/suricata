@@ -23,22 +23,10 @@
  * Lock profiling wrappers
  */
 
-#ifndef SURICATA_THREADS_PROFILE_H
-#define SURICATA_THREADS_PROFILE_H
-
-// UtilCpuGetTicks
-#include "util-cpu.h"
-
-#define PROFILING_MAX_LOCKS 64
+#ifndef __THREADS_PROFILE_H__
+#define __THREADS_PROFILE_H__
 
 /* profiling */
-
-enum {
-    LOCK_MUTEX,
-    LOCK_SPIN,
-    LOCK_RWW, /**< rwlock, writer */
-    LOCK_RWR, /**< rwlock, reader */
-};
 
 typedef struct ProfilingLock_ {
     char *file;

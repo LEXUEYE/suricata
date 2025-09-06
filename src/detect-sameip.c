@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2021 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -24,13 +24,13 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
 #include "decode.h"
 #include "detect.h"
 
 #include "detect-parse.h"
 #include "detect-engine.h"
 #include "detect-engine-mpm.h"
-#include "detect-engine-build.h"
 
 #include "detect-sameip.h"
 
@@ -92,22 +92,29 @@ static int DetectSameipMatch(DetectEngineThreadCtx *det_ctx,
  */
 static int DetectSameipSetup(DetectEngineCtx *de_ctx, Signature *s, const char *optstr)
 {
+    SigMatch *sm = NULL;
 
     /* Get this into a SigMatch and put it in the Signature. */
-
-    if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_SAMEIP, NULL, DETECT_SM_LIST_MATCH) == NULL) {
+    sm = SigMatchAlloc();
+    if (sm == NULL)
         goto error;
-    }
+
+    sm->type = DETECT_SAMEIP;
+    sm->ctx = NULL;
+
+    SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_MATCH);
     s->flags |= SIG_FLAG_REQUIRE_PACKET;
 
     return 0;
 
 error:
+    if (sm != NULL)
+        SCFree(sm);
     return -1;
+
 }
 
 #ifdef UNITTESTS
-#include "detect-engine-alert.h"
 
 /* NOTE: No parameters, so no parse tests */
 
@@ -125,6 +132,7 @@ static int DetectSameipSigTest01(void)
     Packet *p2 = NULL;
     ThreadVars th_v;
     DetectEngineThreadCtx *det_ctx;
+    int result = 0;
 
     memset(&th_v, 0, sizeof(th_v));
 
@@ -135,28 +143,45 @@ static int DetectSameipSigTest01(void)
     p2 = UTHBuildPacketSrcDst(buf, buflen, IPPROTO_TCP, "1.2.3.4", "4.3.2.1");
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    if (de_ctx == NULL) {
+        goto end;
+    }
 
     de_ctx->flags |= DE_QUIET;
 
     de_ctx->sig_list = SigInit(de_ctx,
                                      "alert tcp any any -> any any "
                                      "(msg:\"Testing sameip\"; sameip; sid:1;)");
-    FAIL_IF_NULL(de_ctx->sig_list);
+    if (de_ctx->sig_list == NULL) {
+        goto end;
+    }
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
 
     SigMatchSignatures(&th_v, de_ctx, det_ctx, p1);
-    FAIL_IF(PacketAlertCheck(p1, 1) == 0);
+    if (PacketAlertCheck(p1, 1) == 0) {
+        printf("sid 2 did not alert, but should have: ");
+        goto cleanup;
+    }
 
     SigMatchSignatures(&th_v, de_ctx, det_ctx, p2);
-    FAIL_IF(PacketAlertCheck(p2, 1) != 0);
+    if (PacketAlertCheck(p2, 1) != 0) {
+        printf("sid 2 alerted, but should not have: ");
+        goto cleanup;
+    }
+
+    result = 1;
+
+cleanup:
+    SigGroupCleanup(de_ctx);
+    SigCleanSignatures(de_ctx);
 
     DetectEngineThreadCtxDeinit(&th_v, (void *)det_ctx);
     DetectEngineCtxFree(de_ctx);
 
-    PASS;
+end:
+    return result;
 }
 
 /**

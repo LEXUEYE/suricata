@@ -22,17 +22,18 @@
  * \author Ignacio Sanchez <sanchezmartin.ji@gmail.com>
  * \author Paulo Pacheco <fooinha@gmail.com>
  *
- * Common custom logging format
+ * Common custom loggging format
  */
 
-#ifndef SURICATA_LOG_CF_COMMON_H
-#define SURICATA_LOG_CF_COMMON_H
+#ifndef __LOG_CF_COMMON_H__
+#define __LOG_CF_COMMON_H__
 
 #define LOG_MAXN_NODES 64
 #define LOG_NODE_STRLEN 256
 #define LOG_NODE_MAXOUTPUTLEN 8192
 
 #define TIMESTAMP_DEFAULT_FORMAT "%D-%H:%M:%S"
+#define TIMESTAMP_DEFAULT_FORMAT_LEN 62
 
 /* Common format nodes */
 #define LOG_CF_NONE "-"
@@ -49,7 +50,8 @@
 #define LOG_CF_SPACE_SEPARATOR " "
 #define LOG_CF_UNKNOWN_VALUE "-"
 
-#define LOG_CF_WRITE_STAR_SEPARATOR(buffer) MemBufferWriteString(buffer, LOG_CF_STAR_SEPARATOR);
+#define LOG_CF_WRITE_STAR_SEPATATOR(buffer) \
+    MemBufferWriteString(buffer, LOG_CF_STAR_SEPARATOR);
 
 #define LOG_CF_WRITE_SPACE_SEPARATOR(buffer) \
     MemBufferWriteString(buffer, LOG_CF_SPACE_SEPARATOR);
@@ -63,7 +65,7 @@
 
 typedef struct LogCustomFormatNode_ {
     uint32_t type;              /**< Node format type. ie: LOG_CF_LITERAL, ... */
-    uint32_t maxlen;            /**< Maximum length of the data */
+    uint32_t maxlen;            /**< Maximun length of the data */
     char data[LOG_NODE_STRLEN]; /**< optional data. ie: http header name */
 } LogCustomFormatNode;
 
@@ -82,7 +84,7 @@ void LogCustomFormatFree(LogCustomFormat *cf);
 void LogCustomFormatAddNode(LogCustomFormat *cf, LogCustomFormatNode *node);
 int LogCustomFormatParse(LogCustomFormat *cf, const char *format);
 
-void LogCustomFormatWriteTimestamp(MemBuffer *buffer, const char *fmt, const SCTime_t ts);
+void LogCustomFormatWriteTimestamp(MemBuffer *buffer, const char *fmt, const struct timeval *ts);
 void LogCustomFormatRegister(void);
 
-#endif /* SURICATA_LOG_CF_COMMON_H */
+#endif /* __LOG_CF_COMMON_H__ */

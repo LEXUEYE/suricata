@@ -25,10 +25,8 @@
 
 #include "suricata-common.h"
 #include "feature.h"
-#include "threads.h"
 
-#include "util-debug.h"
-#include "util-hashlist.h"
+#include "util-hash.h"
 
 typedef struct FeatureEntryType {
 	const char *feature;
@@ -42,10 +40,10 @@ static uint32_t FeatureHashFunc(HashListTable *ht, void *data,
 {
     FeatureEntryType *f = (FeatureEntryType *)data;
     uint32_t hash = 0;
-    size_t len = strlen(f->feature);
+    int len = strlen(f->feature);
 
-    for (size_t i = 0; i < len; i++)
-        hash += u8_tolower((unsigned char)f->feature[i]);
+    for (int i = 0; i < len; i++)
+        hash += tolower((unsigned char)f->feature[i]);
 
     return (hash % ht->array_size);
 }
@@ -55,8 +53,8 @@ static char FeatureHashCompareFunc(void *data1, uint16_t datalen1,
 {
     FeatureEntryType *f1 = (FeatureEntryType *)data1;
     FeatureEntryType *f2 = (FeatureEntryType *)data2;
-    size_t len1 = 0;
-    size_t len2 = 0;
+    int len1 = 0;
+    int len2 = 0;
 
     if (f1 == NULL || f2 == NULL)
         return 0;
@@ -85,7 +83,7 @@ static void FeatureInit(void) {
                                            FeatureHashFreeFunc);
 
     if (!feature_hash_table) {
-        FatalError("Unable to allocate feature hash table.");
+        FatalError(SC_ERR_MEM_ALLOC, "Unable to allocate feature hash table.");
     }
 }
 
@@ -95,7 +93,7 @@ static void FeatureAddEntry(const char *feature_name)
 
     FeatureEntryType *feature = SCCalloc(1, sizeof(*feature));
     if (!feature) {
-        FatalError("Unable to allocate feature entry memory.");
+        FatalError(SC_ERR_MEM_ALLOC, "Unable to allocate feature entry memory.");
     }
 
     feature->feature = SCStrdup(feature_name);

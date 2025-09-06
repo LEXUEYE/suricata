@@ -21,13 +21,10 @@
  * \author Eric Leblond <eric@regit.org>
  */
 
-#ifndef SURICATA_DETECT_REPLACE_H
-#define SURICATA_DETECT_REPLACE_H
+#ifndef __DETECT_REPLACE_H__
+#define __DETECT_REPLACE_H__
 
-#include "detect-content.h"
-
-DetectReplaceList *DetectReplaceAddToList(
-        DetectReplaceList *replist, uint8_t *found, const DetectContentData *cd);
+DetectReplaceList * DetectReplaceAddToList(DetectReplaceList *replist, uint8_t *found, DetectContentData *cd);
 
 /* Internal functions are only called via the inline functions below. */
 void DetectReplaceExecuteInternal(Packet *p, DetectReplaceList *replist);

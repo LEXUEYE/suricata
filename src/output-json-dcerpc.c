@@ -1,4 +1,4 @@
-/* Copyright (C) 2017-2021 Open Information Security Foundation
+/* Copyright (C) 2017-2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -16,11 +16,28 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
+#include "pkt-var.h"
+#include "conf.h"
+
+#include "threads.h"
+#include "threadvars.h"
+#include "tm-threads.h"
+
+#include "util-unittest.h"
 #include "util-buffer.h"
+#include "util-debug.h"
+#include "util-byte.h"
+
 #include "output.h"
 #include "output-json.h"
+
+#include "app-layer.h"
 #include "app-layer-parser.h"
+#include "app-layer-dcerpc-udp.h"
+#include "app-layer-dcerpc-common.h"
 #include "output-json-dcerpc.h"
+
 #include "rust.h"
 
 
@@ -29,47 +46,48 @@ static int JsonDCERPCLogger(ThreadVars *tv, void *thread_data,
 {
     OutputJsonThreadCtx *thread = thread_data;
 
-    SCJsonBuilder *jb = CreateEveHeader(p, LOG_DIR_FLOW, "dcerpc", NULL, thread->ctx);
+    JsonBuilder *jb = CreateEveHeader(p, LOG_DIR_FLOW, "dcerpc", NULL);
     if (unlikely(jb == NULL)) {
         return TM_ECODE_FAILED;
     }
 
-    SCJbOpenObject(jb, "dcerpc");
+    jb_open_object(jb, "dcerpc");
     if (p->proto == IPPROTO_TCP) {
-        if (!SCDcerpcLogJsonRecordTcp(state, tx, jb)) {
+        if (!rs_dcerpc_log_json_record_tcp(state, tx, jb)) {
             goto error;
         }
     } else {
-        if (!SCDcerpcLogJsonRecordUdp(state, tx, jb)) {
+        if (!rs_dcerpc_log_json_record_udp(state, tx, jb)) {
             goto error;
         }
     }
-    SCJbClose(jb);
+    jb_close(jb);
 
     MemBufferReset(thread->buffer);
-    OutputJsonBuilderBuffer(tv, p, p->flow, jb, thread);
+    OutputJsonBuilderBuffer(jb, thread->file_ctx, &thread->buffer);
 
-    SCJbFree(jb);
+    jb_free(jb);
     return TM_ECODE_OK;
 
 error:
-    SCJbFree(jb);
+    jb_free(jb);
     return TM_ECODE_FAILED;
 }
 
-static OutputInitResult DCERPCLogInitSub(SCConfNode *conf, OutputCtx *parent_ctx)
+static OutputInitResult DCERPCLogInitSub(ConfNode *conf, OutputCtx *parent_ctx)
 {
-    SCAppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_DCERPC);
-    SCAppLayerParserRegisterLogger(IPPROTO_UDP, ALPROTO_DCERPC);
+    AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_DCERPC);
+    AppLayerParserRegisterLogger(IPPROTO_UDP, ALPROTO_DCERPC);
     return OutputJsonLogInitSub(conf, parent_ctx);
 }
 
 void JsonDCERPCLogRegister(void)
 {
     /* Register as an eve sub-module. */
-    OutputRegisterTxSubModule(LOGGER_JSON_TX, "eve-log", "JsonDCERPCLog", "eve-log.dcerpc",
-            DCERPCLogInitSub, ALPROTO_DCERPC, JsonDCERPCLogger, JsonLogThreadInit,
-            JsonLogThreadDeinit);
+    OutputRegisterTxSubModule(LOGGER_JSON_DCERPC, "eve-log", "JsonDCERPCLog",
+        "eve-log.dcerpc", DCERPCLogInitSub, ALPROTO_DCERPC,
+        JsonDCERPCLogger, JsonLogThreadInit,
+        JsonLogThreadDeinit, NULL);
 
     SCLogDebug("DCERPC JSON logger registered.");
 }

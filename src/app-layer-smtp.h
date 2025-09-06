@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2021 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,15 +21,14 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_APP_LAYER_SMTP_H
-#define SURICATA_APP_LAYER_SMTP_H
+#ifndef __APP_LAYER_SMTP_H__
+#define __APP_LAYER_SMTP_H__
 
-#include "app-layer-frames.h"
+#include "decode-events.h"
+#include "util-decode-mime.h"
+#include "queue.h"
 #include "util-streaming-buffer.h"
 #include "rust.h"
-
-/* Limit till the data would be buffered in current line */
-#define SMTP_LINE_BUFFER_LIMIT 4096
 
 enum {
     SMTP_DECODER_EVENT_INVALID_REPLY,
@@ -41,7 +40,6 @@ enum {
     SMTP_DECODER_EVENT_NO_SERVER_WELCOME_MESSAGE,
     SMTP_DECODER_EVENT_TLS_REJECTED,
     SMTP_DECODER_EVENT_DATA_COMMAND_REJECTED,
-    SMTP_DECODER_EVENT_FAILED_PROTOCOL_CHANGE,
 
     /* MIME Events */
     SMTP_DECODER_EVENT_MIME_PARSE_FAILED,
@@ -58,8 +56,6 @@ enum {
     /* Invalid behavior or content */
     SMTP_DECODER_EVENT_DUPLICATE_FIELDS,
     SMTP_DECODER_EVENT_UNPARSABLE_CONTENT,
-    /* For line >= 4KB */
-    SMTP_DECODER_EVENT_TRUNCATED_LINE,
 };
 
 typedef struct SMTPString_ {
@@ -75,14 +71,16 @@ typedef struct SMTPTransaction_ {
 
     AppLayerTxData tx_data;
 
-    /** the tx is complete and can be logged and cleaned */
-    bool done;
-    /** the tx has seen a DATA command */
-    // another DATA command within the same context
-    // will trigger an app-layer event.
-    bool is_data;
+    int done;
+    /** the first message contained in the session */
+    MimeDecEntity *msg_head;
+    /** the last message contained in the session */
+    MimeDecEntity *msg_tail;
     /** the mime decoding parser state */
-    MimeStateSMTP *mime_state;
+    MimeDecParseState *mime_state;
+
+    AppLayerDecoderEvents *decoder_events;          /**< per tx events */
+    DetectEngineState *de_state;
 
     /* MAIL FROM parameters */
     uint8_t *mail_from;
@@ -90,40 +88,56 @@ typedef struct SMTPTransaction_ {
 
     TAILQ_HEAD(, SMTPString_) rcpt_to_list;  /**< rcpt to string list */
 
-    FileContainer files_ts;
-
     TAILQ_ENTRY(SMTPTransaction_) next;
 } SMTPTransaction;
 
-/**
- * \brief Structure for containing configuration options
- *
- */
-
 typedef struct SMTPConfig {
 
-    bool decode_mime;
+    int decode_mime;
+    MimeDecConfig mime_config;
     uint32_t content_limit;
     uint32_t content_inspect_min_size;
     uint32_t content_inspect_window;
-    uint64_t max_tx;
 
-    bool raw_extraction;
+    int raw_extraction;
 
     StreamingBufferConfig sbcfg;
 } SMTPConfig;
 
 typedef struct SMTPState_ {
-    AppLayerStateData state_data;
     SMTPTransaction *curr_tx;
     TAILQ_HEAD(, SMTPTransaction_) tx_list;  /**< transaction list */
     uint64_t tx_cnt;
     uint64_t toserver_data_count;
     uint64_t toserver_last_data_stamp;
 
-    /* If rest of the bytes should be discarded in case of long line w/o LF */
-    bool discard_till_lf_ts;
-    bool discard_till_lf_tc;
+    /* current input that is being parsed */
+    const uint8_t *input;
+    int32_t input_len;
+    uint8_t direction;
+
+    /* --parser details-- */
+    /** current line extracted by the parser from the call to SMTPGetline() */
+    const uint8_t *current_line;
+    /** length of the line in current_line.  Doesn't include the delimiter */
+    int32_t current_line_len;
+    uint8_t current_line_delimiter_len;
+
+    /** used to indicate if the current_line buffer is a malloced buffer.  We
+     * use a malloced buffer, if a line is fragmented */
+    uint8_t *tc_db;
+    int32_t tc_db_len;
+    uint8_t tc_current_line_db;
+    /** we have see LF for the currently parsed line */
+    uint8_t tc_current_line_lf_seen;
+
+    /** used to indicate if the current_line buffer is a malloced buffer.  We
+     * use a malloced buffer, if a line is fragmented */
+    uint8_t *ts_db;
+    int32_t ts_db_len;
+    uint8_t ts_current_line_db;
+    /** we have see LF for the currently parsed line */
+    uint8_t ts_current_line_lf_seen;
 
     /** var to indicate parser state */
     uint8_t parser_state;
@@ -152,15 +166,17 @@ typedef struct SMTPState_ {
 
     /* SMTP Mime decoding and file extraction */
     /** the list of files sent to the server */
+    FileContainer *files_ts;
     uint32_t file_track_id;
 } SMTPState;
 
 /* Create SMTP config structure */
 extern SMTPConfig smtp_config;
 
+int SMTPProcessDataChunk(const uint8_t *chunk, uint32_t len, MimeDecParseState *state);
 void *SMTPStateAlloc(void *orig_state, AppProto proto_orig);
 void RegisterSMTPParsers(void);
 void SMTPParserCleanup(void);
 void SMTPParserRegisterTests(void);
 
-#endif /* SURICATA_APP_LAYER_SMTP_H */
+#endif /* __APP_LAYER_SMTP_H__ */

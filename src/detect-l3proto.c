@@ -25,6 +25,7 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
 #include "decode.h"
 #include "detect.h"
 
@@ -33,7 +34,6 @@
 #include "detect-parse.h"
 #include "detect-engine.h"
 #include "detect-engine-mpm.h"
-#include "detect-engine-build.h"
 
 #include "detect-engine-siggroup.h"
 #include "detect-engine-address.h"
@@ -84,7 +84,7 @@ static int DetectL3ProtoSetup(DetectEngineCtx *de_ctx, Signature *s, const char 
     if (strcasecmp(str,"ipv4") == 0 ||
             strcasecmp(str,"ip4") == 0 ) {
         if (s->proto.flags & DETECT_PROTO_IPV6) {
-            SCLogError("Conflicting l3 proto specified");
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "Conflicting l3 proto specified");
             goto error;
         }
         s->proto.flags |= DETECT_PROTO_IPV4;
@@ -92,13 +92,13 @@ static int DetectL3ProtoSetup(DetectEngineCtx *de_ctx, Signature *s, const char 
     } else if (strcasecmp(str,"ipv6") == 0 ||
             strcasecmp(str,"ip6") == 0 ) {
         if (s->proto.flags & DETECT_PROTO_IPV6) {
-            SCLogError("Conflicting l3 proto specified");
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "Conflicting l3 proto specified");
             goto error;
         }
         s->proto.flags |= DETECT_PROTO_IPV6;
         SCLogDebug("IPv6 protocol detected");
     } else {
-        SCLogError("Invalid l3 proto: \"%s\"", str);
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "Invalid l3 proto: \"%s\"", str);
         goto error;
     }
 
@@ -108,7 +108,6 @@ error:
 }
 
 #ifdef UNITTESTS
-#include "detect-engine-alert.h"
 
 /**
  * \test DetectL3protoTestSig01 is a test for checking the working of ttl keyword
@@ -120,10 +119,12 @@ static int DetectL3protoTestSig1(void)
 {
 
     Packet *p = PacketGetFromAlloc();
-    FAIL_IF_NULL(p);
+    if (unlikely(p == NULL))
+        return 0;
     Signature *s = NULL;
     ThreadVars th_v;
     DetectEngineThreadCtx *det_ctx;
+    int result = 0;
     IPV4Hdr ip4h;
 
     memset(&th_v, 0, sizeof(th_v));
@@ -131,44 +132,65 @@ static int DetectL3protoTestSig1(void)
     p->src.family = AF_INET;
     p->dst.family = AF_INET;
     p->proto = IPPROTO_TCP;
-    UTHSetIPV4Hdr(p, &ip4h);
+    p->ip4h = &ip4h;
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    if (de_ctx == NULL) {
+        goto end;
+    }
 
     de_ctx->flags |= DE_QUIET;
 
-    s = DetectEngineAppendSig(
-            de_ctx, "alert ip any any -> any any (msg:\"l3proto ipv4\"; l3_proto:ipv4; sid:1;)");
-    FAIL_IF_NULL(s);
+    s = de_ctx->sig_list = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ipv4\"; l3_proto:ipv4; sid:1;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(
-            de_ctx, "alert ip any any -> any any (msg:\"l3proto ipv6\"; l3_proto:ipv6; sid:2;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ipv6\"; l3_proto:ipv6; sid:2;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(
-            de_ctx, "alert ip any any -> any any (msg:\"l3proto ip4\"; l3_proto:ip4; sid:3;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ip4\"; l3_proto:ip4; sid:3;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(
-            de_ctx, "alert ip any any -> any any (msg:\"l3proto ip6\"; l3_proto:ip6; sid:4;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ip6\"; l3_proto:ip6; sid:2;)");
+    if (s == NULL) {
+        goto end;
+    }
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
 
     SigMatchSignatures(&th_v, de_ctx, det_ctx, p);
-    FAIL_IF_NOT(PacketAlertCheck(p, 1));
-    FAIL_IF(PacketAlertCheck(p, 2));
-    FAIL_IF_NOT(PacketAlertCheck(p, 3));
-    FAIL_IF(PacketAlertCheck(p, 4));
+    if (PacketAlertCheck(p, 1) == 0) {
+        printf("sid 1 did not alert, but should have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 2)) {
+        printf("sid 2 alerted, but should not have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 3) == 0) {
+        printf("sid 3 did not alert, but should have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 4)) {
+        printf("sid 4 alerted, but should not have: ");
+        goto cleanup;
+    }
+
+    result = 1;
+
+cleanup:
+    SigGroupCleanup(de_ctx);
+    SigCleanSignatures(de_ctx);
 
     DetectEngineThreadCtxDeinit(&th_v, (void *)det_ctx);
     DetectEngineCtxFree(de_ctx);
 
+end:
     SCFree(p);
-
-    PASS;
+    return result;
 }
 
 /**
@@ -181,10 +203,12 @@ static int DetectL3protoTestSig2(void)
 {
 
     Packet *p = PacketGetFromAlloc();
-    FAIL_IF_NULL(p);
+    if (unlikely(p == NULL))
+        return 0;
     Signature *s = NULL;
     ThreadVars th_v;
     DetectEngineThreadCtx *det_ctx;
+    int result = 0;
     IPV6Hdr ip6h;
 
     memset(&th_v, 0, sizeof(th_v));
@@ -192,59 +216,82 @@ static int DetectL3protoTestSig2(void)
     p->src.family = AF_INET6;
     p->dst.family = AF_INET6;
     p->proto = IPPROTO_TCP;
-    UTHSetIPV6Hdr(p, &ip6h);
+    p->ip6h = &ip6h;
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    if (de_ctx == NULL) {
+        goto end;
+    }
 
     de_ctx->flags |= DE_QUIET;
 
-    s = DetectEngineAppendSig(
-            de_ctx, "alert ip any any -> any any (msg:\"l3proto ipv4\"; l3_proto:ipv4; sid:1;)");
-    FAIL_IF_NULL(s);
+    s = de_ctx->sig_list = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ipv4\"; l3_proto:ipv4; sid:1;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(
-            de_ctx, "alert ip any any -> any any (msg:\"l3proto ipv6\"; l3_proto:ipv6; sid:2;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ipv6\"; l3_proto:ipv6; sid:2;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(
-            de_ctx, "alert ip any any -> any any (msg:\"l3proto ip4\"; l3_proto:ip4; sid:3;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ip4\"; l3_proto:ip4; sid:3;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(
-            de_ctx, "alert ip any any -> any any (msg:\"l3proto ip6\"; l3_proto:ip6; sid:4;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ip6\"; l3_proto:ip6; sid:4;)");
+    if (s == NULL) {
+        goto end;
+    }
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
 
     SigMatchSignatures(&th_v, de_ctx, det_ctx, p);
-    FAIL_IF(PacketAlertCheck(p, 1));
-    FAIL_IF_NOT(PacketAlertCheck(p, 2));
-    FAIL_IF(PacketAlertCheck(p, 3));
-    FAIL_IF_NOT(PacketAlertCheck(p, 4));
+    if (PacketAlertCheck(p, 1)) {
+        printf("sid 1 alerted, but should not have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 2) == 0) {
+        printf("sid 2 did not alert, but should have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 3)) {
+        printf("sid 3 alerted, but should not have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 4) == 0) {
+        printf("sid 4 did not alert, but should have: ");
+        goto cleanup;
+    }
+
+    result = 1;
+
+cleanup:
+    SigGroupCleanup(de_ctx);
+    SigCleanSignatures(de_ctx);
 
     DetectEngineThreadCtxDeinit(&th_v, (void *)det_ctx);
     DetectEngineCtxFree(de_ctx);
 
+end:
     SCFree(p);
-
-    PASS;
+    return result;
 }
 
 /**
  * \test DetectL3protoTestSig03 is a test for checking the working of l3proto keyword
- *       in conjunction with ip_proto keyword.
+ *       in conjonction with ip_proto keyword.
  */
 
 static int DetectL3protoTestSig3(void)
 {
 
     Packet *p = PacketGetFromAlloc();
-    FAIL_IF_NULL(p);
+    if (unlikely(p == NULL))
+        return 0;
     Signature *s = NULL;
     ThreadVars th_v;
     DetectEngineThreadCtx *det_ctx;
+    int result = 0;
     IPV6Hdr ip6h;
 
     memset(&th_v, 0, sizeof(th_v));
@@ -252,44 +299,65 @@ static int DetectL3protoTestSig3(void)
     p->src.family = AF_INET6;
     p->dst.family = AF_INET6;
     p->proto = IPPROTO_TCP;
-    UTHSetIPV6Hdr(p, &ip6h);
+    p->ip6h = &ip6h;
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    if (de_ctx == NULL) {
+        goto end;
+    }
 
     de_ctx->flags |= DE_QUIET;
 
-    s = DetectEngineAppendSig(de_ctx, "alert ip any any -> any any (msg:\"l3proto ipv4 and "
-                                      "ip_proto udp\"; l3_proto:ipv4; ip_proto:17; sid:1;)");
-    FAIL_IF_NULL(s);
+    s = de_ctx->sig_list = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ipv4 and ip_proto udp\"; l3_proto:ipv4; ip_proto:17; sid:1;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(de_ctx, "alert ip any any -> any any (msg:\"l3proto ipv6 and "
-                                      "ip_proto udp\"; l3_proto:ipv6; ip_proto:17; sid:2;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ipv6 and ip_proto udp\"; l3_proto:ipv6; ip_proto:17; sid:2;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(de_ctx, "alert ip any any -> any any (msg:\"l3proto ip4 and ip_proto "
-                                      "tcp\"; l3_proto:ipv4; ip_proto:6; sid:3;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ip4 and ip_proto tcp\"; l3_proto:ipv4; ip_proto:6; sid:3;)");
+    if (s == NULL) {
+        goto end;
+    }
 
-    s = DetectEngineAppendSig(de_ctx, "alert ip any any -> any any (msg:\"l3proto ipv6 and "
-                                      "ip_proto tcp\"; l3_proto:ipv6; ip_proto:6; sid:4;)");
-    FAIL_IF_NULL(s);
+    s = s->next = SigInit(de_ctx,"alert ip any any -> any any (msg:\"l3proto ipv6 and ip_proto tcp\"; l3_proto:ipv6; ip_proto:6; sid:4;)");
+    if (s == NULL) {
+        goto end;
+    }
 
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
 
     SigMatchSignatures(&th_v, de_ctx, det_ctx, p);
-    FAIL_IF(PacketAlertCheck(p, 1));
-    FAIL_IF(PacketAlertCheck(p, 2));
-    FAIL_IF(PacketAlertCheck(p, 3));
-    FAIL_IF_NOT(PacketAlertCheck(p, 4));
+    if (PacketAlertCheck(p, 1)) {
+        printf("sid 1 alerted, but should not have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 2)) {
+        printf("sid 2 alerted, but should not have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 3)) {
+        printf("sid 3 alerted, but should not have: ");
+        goto cleanup;
+    } else if (PacketAlertCheck(p, 4) == 0) {
+        printf("sid 4 did not alert, but should have: ");
+        goto cleanup;
+    }
+
+    result = 1;
+
+cleanup:
+    SigGroupCleanup(de_ctx);
+    SigCleanSignatures(de_ctx);
 
     DetectEngineThreadCtxDeinit(&th_v, (void *)det_ctx);
     DetectEngineCtxFree(de_ctx);
 
+end:
     SCFree(p);
-
-    PASS;
+    return result;
 }
 
 /**

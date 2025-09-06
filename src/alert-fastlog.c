@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2021 Open Information Security Foundation
+/* Copyright (C) 2007-2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -25,6 +25,7 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
 #include "detect.h"
 #include "flow.h"
 #include "conf.h"
@@ -39,7 +40,6 @@
 
 #include "detect-parse.h"
 #include "detect-engine.h"
-#include "detect-engine-build.h"
 #include "detect-engine-mpm.h"
 #include "detect-reference.h"
 #include "util-classification-config.h"
@@ -53,8 +53,6 @@
 #include "util-optimize.h"
 #include "util-logopenfile.h"
 #include "util-time.h"
-
-#include "action-globals.h"
 
 #define DEFAULT_LOG_FILENAME "fast.log"
 
@@ -71,22 +69,14 @@ TmEcode AlertFastLogThreadDeinit(ThreadVars *, void *);
 void AlertFastLogRegisterTests(void);
 static void AlertFastLogDeInitCtx(OutputCtx *);
 
-static bool AlertFastLogCondition(ThreadVars *tv, void *thread_data, const Packet *p);
+int AlertFastLogCondition(ThreadVars *tv, const Packet *p);
 int AlertFastLogger(ThreadVars *tv, void *data, const Packet *p);
 
 void AlertFastLogRegister(void)
 {
-    OutputPacketLoggerFunctions output_logger_functions = {
-        .LogFunc = AlertFastLogger,
-        .FlushFunc = NULL,
-        .ConditionFunc = AlertFastLogCondition,
-        .ThreadInitFunc = AlertFastLogThreadInit,
-        .ThreadDeinitFunc = AlertFastLogThreadDeinit,
-        .ThreadExitPrintStatsFunc = NULL,
-    };
-
-    OutputRegisterPacketModule(
-            LOGGER_ALERT_FAST, MODULE_NAME, "fast", AlertFastLogInitCtx, &output_logger_functions);
+    OutputRegisterPacketModule(LOGGER_ALERT_FAST, MODULE_NAME, "fast",
+        AlertFastLogInitCtx, AlertFastLogger, AlertFastLogCondition,
+        AlertFastLogThreadInit, AlertFastLogThreadDeinit, NULL);
     AlertFastLogRegisterTests();
 }
 
@@ -95,9 +85,9 @@ typedef struct AlertFastLogThread_ {
     LogFileCtx* file_ctx;
 } AlertFastLogThread;
 
-static bool AlertFastLogCondition(ThreadVars *tv, void *thread_data, const Packet *p)
+int AlertFastLogCondition(ThreadVars *tv, const Packet *p)
 {
-    return (p->alerts.cnt > 0);
+    return (p->alerts.cnt ? TRUE : FALSE);
 }
 
 static inline void AlertFastLogOutputAlert(AlertFastLogThread *aft, char *buffer,
@@ -114,13 +104,13 @@ int AlertFastLogger(ThreadVars *tv, void *data, const Packet *p)
     char timebuf[64];
     int decoder_event = 0;
 
-    CreateTimeString(p->ts, timebuf, sizeof(timebuf));
+    CreateTimeString(&p->ts, timebuf, sizeof(timebuf));
 
     char srcip[46], dstip[46];
-    if (PacketIsIPv4(p)) {
+    if (PKT_IS_IPV4(p)) {
         PrintInet(AF_INET, (const void *)GET_IPV4_SRC_ADDR_PTR(p), srcip, sizeof(srcip));
         PrintInet(AF_INET, (const void *)GET_IPV4_DST_ADDR_PTR(p), dstip, sizeof(dstip));
-    } else if (PacketIsIPv6(p)) {
+    } else if (PKT_IS_IPV6(p)) {
         PrintInet(AF_INET6, (const void *)GET_IPV6_SRC_ADDR(p), srcip, sizeof(srcip));
         PrintInet(AF_INET6, (const void *)GET_IPV6_DST_ADDR(p), dstip, sizeof(dstip));
     } else {
@@ -136,16 +126,16 @@ int AlertFastLogger(ThreadVars *tv, void *data, const Packet *p)
     char alert_buffer[MAX_FASTLOG_BUFFER_SIZE];
 
     char proto[16] = "";
-    const char *protoptr;
-    if (SCProtoNameValid(PacketGetIPProto(p))) {
-        protoptr = known_proto[PacketGetIPProto(p)];
+    char *protoptr;
+    if (SCProtoNameValid(IP_GET_IPPROTO(p))) {
+        protoptr = known_proto[IP_GET_IPPROTO(p)];
     } else {
-        snprintf(proto, sizeof(proto), "PROTO:%03" PRIu32, PacketGetIPProto(p));
+        snprintf(proto, sizeof(proto), "PROTO:%03" PRIu32, IP_GET_IPPROTO(p));
         protoptr = proto;
     }
     uint16_t src_port_or_icmp = p->sp;
     uint16_t dst_port_or_icmp = p->dp;
-    if (PacketGetIPProto(p) == IPPROTO_ICMP || PacketGetIPProto(p) == IPPROTO_ICMPV6) {
+    if (IP_GET_IPPROTO(p) == IPPROTO_ICMP || IP_GET_IPPROTO(p) == IPPROTO_ICMPV6) {
         src_port_or_icmp = p->icmp_s.type;
         dst_port_or_icmp = p->icmp_s.code;
     }
@@ -196,16 +186,17 @@ int AlertFastLogger(ThreadVars *tv, void *data, const Packet *p)
 
 TmEcode AlertFastLogThreadInit(ThreadVars *t, const void *initdata, void **data)
 {
-    AlertFastLogThread *aft = SCCalloc(1, sizeof(AlertFastLogThread));
+    AlertFastLogThread *aft = SCMalloc(sizeof(AlertFastLogThread));
     if (unlikely(aft == NULL))
         return TM_ECODE_FAILED;
+    memset(aft, 0, sizeof(AlertFastLogThread));
     if(initdata == NULL)
     {
         SCLogDebug("Error getting context for AlertFastLog.  \"initdata\" argument NULL");
         SCFree(aft);
         return TM_ECODE_FAILED;
     }
-    /** Use the Output Context (file pointer and mutex) */
+    /** Use the Ouptut Context (file pointer and mutex) */
     aft->file_ctx = ((OutputCtx *)initdata)->data;
 
     *data = (void *)aft;
@@ -231,7 +222,7 @@ TmEcode AlertFastLogThreadDeinit(ThreadVars *t, void *data)
  * \param conf The configuration node for this output.
  * \return A LogFileCtx pointer on success, NULL on failure.
  */
-OutputInitResult AlertFastLogInitCtx(SCConfNode *conf)
+OutputInitResult AlertFastLogInitCtx(ConfNode *conf)
 {
     OutputInitResult result = { NULL, false };
     LogFileCtx *logfile_ctx = LogFileNewCtx();
@@ -272,6 +263,7 @@ static void AlertFastLogDeInitCtx(OutputCtx *output_ctx)
 
 static int AlertFastLogTest01(void)
 {
+    int result = 0;
     uint8_t *buf = (uint8_t *) "GET /one/ HTTP/1.1\r\n"
         "Host: one.example.org\r\n";
 
@@ -284,12 +276,14 @@ static int AlertFastLogTest01(void)
     p = UTHBuildPacket(buf, buflen, IPPROTO_TCP);
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF(de_ctx == NULL);
+    if (de_ctx == NULL) {
+        return result;
+    }
 
     de_ctx->flags |= DE_QUIET;
 
     FILE *fd = SCClassConfGenerateValidDummyClassConfigFD01();
-    SCClassConfLoadClassificationConfigFile(de_ctx, fd);
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
 
     de_ctx->sig_list = SigInit(de_ctx, "alert tcp any any -> any any "
             "(msg:\"FastLog test\"; content:\"GET\"; "
@@ -299,8 +293,9 @@ static int AlertFastLogTest01(void)
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
 
     SigMatchSignatures(&th_v, de_ctx, det_ctx, p);
-    FAIL_IF_NOT(p->alerts.cnt == 1);
-    FAIL_IF_NOT(strcmp(p->alerts.alerts[0].s->class_msg, "Unknown are we") == 0);
+    if (p->alerts.cnt == 1) {
+        result = (strcmp(p->alerts.alerts[0].s->class_msg, "Unknown are we") == 0);
+    }
 
     SigGroupCleanup(de_ctx);
     SigCleanSignatures(de_ctx);
@@ -308,11 +303,12 @@ static int AlertFastLogTest01(void)
     DetectEngineCtxFree(de_ctx);
 
     UTHFreePackets(&p, 1);
-    PASS;
+    return result;
 }
 
 static int AlertFastLogTest02(void)
 {
+    int result = 0;
     uint8_t *buf = (uint8_t *) "GET /one/ HTTP/1.1\r\n"
         "Host: one.example.org\r\n";
     uint16_t buflen = strlen((char *)buf);
@@ -325,12 +321,14 @@ static int AlertFastLogTest02(void)
     p = UTHBuildPacket(buf, buflen, IPPROTO_TCP);
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF(de_ctx == NULL);
+    if (de_ctx == NULL) {
+        return result;
+    }
 
     de_ctx->flags |= DE_QUIET;
 
     FILE *fd = SCClassConfGenerateValidDummyClassConfigFD01();
-    SCClassConfLoadClassificationConfigFile(de_ctx, fd);
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
 
     de_ctx->sig_list = SigInit(de_ctx, "alert tcp any any -> any any "
             "(msg:\"FastLog test\"; content:\"GET\"; "
@@ -340,8 +338,12 @@ static int AlertFastLogTest02(void)
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
 
     SigMatchSignatures(&th_v, de_ctx, det_ctx, p);
-    FAIL_IF_NOT(p->alerts.cnt == 1);
-    FAIL_IF_NOT(strcmp(p->alerts.alerts[0].s->class_msg, "Unknown are we") == 0);
+    if (p->alerts.cnt == 1) {
+        result = (strcmp(p->alerts.alerts[0].s->class_msg,
+                    "Unknown are we") == 0);
+        if (result == 0)
+            printf("p->alerts.alerts[0].class_msg %s: ", p->alerts.alerts[0].s->class_msg);
+    }
 
     SigGroupCleanup(de_ctx);
     SigCleanSignatures(de_ctx);
@@ -349,7 +351,7 @@ static int AlertFastLogTest02(void)
     DetectEngineCtxFree(de_ctx);
 
     UTHFreePackets(&p, 1);
-    PASS;
+    return result;
 }
 
 #endif /* UNITTESTS */

@@ -21,10 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_NFS_VERSION_H
-#define SURICATA_DETECT_NFS_VERSION_H
+#ifndef __DETECT_NFS_VERSION_H__
+#define __DETECT_NFS_VERSION_H__
 
 /* prototypes */
 void DetectNfsVersionRegister (void);
 
-#endif /* SURICATA_DETECT_NFS_VERSION_H */
+#endif /* __DETECT_NFS_VERSION_H__ */

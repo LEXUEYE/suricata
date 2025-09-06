@@ -40,29 +40,37 @@
 #include <sys/prctl.h>
 #endif
 #include "threadvars.h"
+#include "util-cpu.h"
 #include "runmodes.h"
 
 /** flag indicating if we'll be using caps */
-extern bool sc_set_caps;
+extern int sc_set_caps;
+
+/** our current runmode */
+extern int run_mode;
 
 /**
- * \brief   Drop the privileges of the main thread
+ * \brief   Drop the previliges of the main thread
  */
 void SCDropMainThreadCaps(uint32_t userid, uint32_t groupid)
 {
-    if (!sc_set_caps)
+    if (sc_set_caps == FALSE)
         return;
 
     capng_clear(CAPNG_SELECT_BOTH);
 
-    switch (SCRunmodeGet()) {
+    switch (run_mode) {
         case RUNMODE_PCAP_DEV:
         case RUNMODE_AFP_DEV:
-        case RUNMODE_AFXDP_DEV:
             capng_updatev(CAPNG_ADD, CAPNG_EFFECTIVE|CAPNG_PERMITTED,
                     CAP_NET_RAW,            /* needed for pcap live mode */
                     CAP_SYS_NICE,
                     CAP_NET_ADMIN,
+                    -1);
+            break;
+        case RUNMODE_PFRING:
+            capng_updatev(CAPNG_ADD, CAPNG_EFFECTIVE|CAPNG_PERMITTED,
+                    CAP_NET_ADMIN, CAP_NET_RAW, CAP_SYS_NICE,
                     -1);
             break;
         case RUNMODE_NFLOG:
@@ -72,14 +80,12 @@ void SCDropMainThreadCaps(uint32_t userid, uint32_t groupid)
                     CAP_SYS_NICE,
                     -1);
             break;
-        default:
-            break;
     }
 
     if (capng_change_id(userid, groupid, CAPNG_DROP_SUPP_GRP |
             CAPNG_CLEAR_BOUNDING) < 0)
     {
-        FatalError("capng_change_id for main thread"
+        FatalError(SC_ERR_FATAL, "capng_change_id for main thread"
                    " failed");
     }
 
@@ -138,33 +144,28 @@ void SCDropCaps(ThreadVars *tv)
  * \param   uid         pointer to the user id in which result will be stored
  * \param   gid         pointer to the group id in which result will be stored
  *
- * \retval  FatalError on a failure
+ * \retval  upon success it return 0
  */
-void SCGetUserID(const char *user_name, const char *group_name, uint32_t *uid, uint32_t *gid)
+int SCGetUserID(const char *user_name, const char *group_name, uint32_t *uid, uint32_t *gid)
 {
     uint32_t userid = 0;
     uint32_t groupid = 0;
     struct passwd *pw;
 
-    if (user_name == NULL || strlen(user_name) == 0) {
-        FatalError("no user name was provided - ensure it is specified either in the configuration "
-                   "file (run-as.user) or in command-line arguments (--user)");
-    }
-
     /* Get the user ID */
     if (isdigit((unsigned char)user_name[0]) != 0) {
         if (ByteExtractStringUint32(&userid, 10, 0, (const char *)user_name) < 0) {
-            FatalError("invalid user id value: '%s'", user_name);
+            FatalError(SC_ERR_UID_FAILED, "invalid user id value: '%s'", user_name);
         }
         pw = getpwuid(userid);
        if (pw == NULL) {
-           FatalError("unable to get the user ID, "
-                      "check if user exist!!");
+            FatalError(SC_ERR_FATAL, "unable to get the user ID, "
+                       "check if user exist!!");
         }
     } else {
         pw = getpwnam(user_name);
         if (pw == NULL) {
-            FatalError("unable to get the user ID, "
+            FatalError(SC_ERR_FATAL, "unable to get the user ID, "
                        "check if user exist!!");
         }
         userid = pw->pw_uid;
@@ -176,12 +177,12 @@ void SCGetUserID(const char *user_name, const char *group_name, uint32_t *uid, u
 
         if (isdigit((unsigned char)group_name[0]) != 0) {
             if (ByteExtractStringUint32(&groupid, 10, 0, (const char *)group_name) < 0) {
-                FatalError("invalid group id: '%s'", group_name);
+                FatalError(SC_ERR_GID_FAILED, "invalid group id: '%s'", group_name);
             }
         } else {
             gp = getgrnam(group_name);
             if (gp == NULL) {
-                FatalError("unable to get the group"
+                FatalError(SC_ERR_FATAL, "unable to get the group"
                            " ID, check if group exist!!");
             }
             groupid = gp->gr_gid;
@@ -197,6 +198,8 @@ void SCGetUserID(const char *user_name, const char *group_name, uint32_t *uid, u
 
     *uid = userid;
     *gid = groupid;
+
+    return 0;
 }
 
 /**
@@ -205,27 +208,22 @@ void SCGetUserID(const char *user_name, const char *group_name, uint32_t *uid, u
  * \param   group_name  pointer to the given group name
  * \param   gid         pointer to the group id in which result will be stored
  *
- * \retval  FatalError on a failure
+ * \retval  upon success it return 0
  */
-void SCGetGroupID(const char *group_name, uint32_t *gid)
+int SCGetGroupID(const char *group_name, uint32_t *gid)
 {
     uint32_t grpid = 0;
     struct group *gp;
 
-    if (group_name == NULL || strlen(group_name) == 0) {
-        FatalError("no group name was provided - ensure it is specified either in the "
-                   "configuration file (run-as.group) or in command-line arguments (--group)");
-    }
-
     /* Get the group ID */
     if (isdigit((unsigned char)group_name[0]) != 0) {
         if (ByteExtractStringUint32(&grpid, 10, 0, (const char *)group_name) < 0) {
-            FatalError("invalid group id: '%s'", group_name);
+            FatalError(SC_ERR_GID_FAILED, "invalid group id: '%s'", group_name);
         }
     } else {
         gp = getgrnam(group_name);
         if (gp == NULL) {
-            FatalError("unable to get the group ID,"
+            FatalError(SC_ERR_FATAL, "unable to get the group ID,"
                        " check if group exist!!");
         }
         grpid = gp->gr_gid;
@@ -235,6 +233,8 @@ void SCGetGroupID(const char *group_name, uint32_t *gid)
     endgrent();
 
     *gid = grpid;
+
+    return 0;
 }
 
 #ifdef __OpenBSD__
@@ -243,9 +243,8 @@ int SCPledge(void)
     int ret = pledge("stdio rpath wpath cpath fattr unix dns bpf", NULL);
 
     if (ret != 0) {
-        SCLogError("unable to pledge,"
-                   " check permissions!! ret=%i errno=%i",
-                ret, errno);
+        SCLogError(SC_ERR_PLEDGE_FAILED, "unable to pledge,"
+                " check permissions!! ret=%i errno=%i", ret, errno);
         exit(EXIT_FAILURE);
     }
 

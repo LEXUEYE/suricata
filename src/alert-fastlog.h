@@ -21,10 +21,13 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_ALERT_FASTLOG_H
-#define SURICATA_ALERT_FASTLOG_H
+#ifndef __ALERT_FASTLOG_H__
+#define __ALERT_FASTLOG_H__
 
 void AlertFastLogRegister(void);
-OutputInitResult AlertFastLogInitCtx(SCConfNode *);
+void TmModuleAlertFastLogIPv4Register(void);
+void TmModuleAlertFastLogIPv6Register(void);
+OutputInitResult AlertFastLogInitCtx(ConfNode *);
 
-#endif /* SURICATA_ALERT_FASTLOG_H */
+#endif /* __ALERT_FASTLOG_H__ */
+

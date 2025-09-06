@@ -22,10 +22,10 @@
  * \author Duarte Silva <duarte.silva@serializing.me>
  */
 
-#ifndef SURICATA_DETECT_FILESHA256_H
-#define SURICATA_DETECT_FILESHA256_H
+#ifndef __DETECT_FILESHA256_H__
+#define __DETECT_FILESHA256_H__
 
 /* prototypes */
 void DetectFileSha256Register (void);
 
-#endif /* SURICATA_DETECT_FILESHA256_H */
+#endif /* __DETECT_FILESHA256_H__ */

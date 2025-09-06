@@ -22,8 +22,6 @@
  *
  */
 
-#include "detect-engine-build.h"
-#include "app-layer-parser.h"
 /**
  * \test Test that a signature containing tls_cert_fingerprint is correctly parsed
  *       and that the keyword is registered.
@@ -32,21 +30,20 @@ static int DetectTlsFingerprintTest01(void)
 {
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
     FAIL_IF_NULL(de_ctx);
-    de_ctx->flags |= DE_QUIET;
 
-    Signature *s = DetectEngineAppendSig(de_ctx,
-            "alert tls any any -> any any "
-            "(msg:\"Testing tls.cert_fingerprint\"; "
-            "tls.cert_fingerprint; "
-            "content:\"11:22:33:44:55:66:77:88:99:00:11:22:33:44:55:66:77:88:99:00\"; "
-            "sid:1;)");
-    FAIL_IF_NULL(s);
+    de_ctx->flags |= DE_QUIET;
+    de_ctx->sig_list = SigInit(de_ctx, "alert tls any any -> any any "
+                               "(msg:\"Testing tls.cert_fingerprint\"; "
+                               "tls.cert_fingerprint; "
+                               "content:\"11:22:33:44:55:66:77:88:99:00:11:22:33:44:55:66:77:88:99:00\"; "
+                               "sid:1;)");
+    FAIL_IF_NULL(de_ctx->sig_list);
 
     /* sm should not be in the MATCH list */
-    SigMatch *sm = s->init_data->smlists[DETECT_SM_LIST_MATCH];
+    SigMatch *sm = de_ctx->sig_list->sm_lists[DETECT_SM_LIST_MATCH];
     FAIL_IF_NOT_NULL(sm);
 
-    sm = DetectBufferGetFirstSigMatch(s, g_tls_cert_fingerprint_buffer_id);
+    sm = de_ctx->sig_list->sm_lists[g_tls_cert_fingerprint_buffer_id];
     FAIL_IF_NULL(sm);
 
     FAIL_IF(sm->type != DETECT_CONTENT);
@@ -303,7 +300,7 @@ static int DetectTlsFingerprintTest02(void)
     p3->flowflags |= FLOW_PKT_ESTABLISHED;
     p3->pcap_cnt = 3;
 
-    StreamTcpInitConfig(true);
+    StreamTcpInitConfig(TRUE);
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
     FAIL_IF_NULL(de_ctx);
@@ -356,7 +353,7 @@ static int DetectTlsFingerprintTest02(void)
     DetectEngineThreadCtxDeinit(&tv, det_ctx);
     SigGroupCleanup(de_ctx);
     DetectEngineCtxFree(de_ctx);
-    StreamTcpFreeConfig(true);
+    StreamTcpFreeConfig(TRUE);
     FLOW_DESTROY(&f);
     UTHFreePacket(p1);
     UTHFreePacket(p2);

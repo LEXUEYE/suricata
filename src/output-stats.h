@@ -23,17 +23,14 @@
  * Stats Logger Output registration functions
  */
 
-#ifndef SURICATA_OUTPUT_STATS_H
-#define SURICATA_OUTPUT_STATS_H
-
-#include "tm-modules.h"
+#ifndef __OUTPUT_STATS_H__
+#define __OUTPUT_STATS_H__
 
 typedef struct StatsRecord_ {
     const char *name;
-    const char *short_name;
     const char *tm_name;
-    int64_t value;  /**< total value */
-    int64_t pvalue; /**< prev value (may be higher for memuse counters) */
+    uint64_t value;         /**< total value */
+    uint64_t pvalue;        /**< prev value (may be higher for memuse counters) */
 } StatsRecord;
 
 typedef struct StatsTable_ {
@@ -49,8 +46,9 @@ TmEcode OutputStatsLog(ThreadVars *tv, void *thread_data, StatsTable *st);
 
 typedef int (*StatsLogger)(ThreadVars *, void *thread_data, const StatsTable *);
 
-int OutputRegisterStatsLogger(const char *name, StatsLogger LogFunc, OutputCtx *,
-        ThreadInitFunc ThreadInit, ThreadDeinitFunc ThreadDeinit);
+int OutputRegisterStatsLogger(const char *name, StatsLogger LogFunc,
+    OutputCtx *, ThreadInitFunc ThreadInit, ThreadDeinitFunc ThreadDeinit,
+    ThreadExitPrintStatsFunc ThreadExitPrintStats);
 
 void TmModuleStatsLoggerRegister (void);
 
@@ -58,4 +56,4 @@ int OutputStatsLoggersRegistered(void);
 
 void OutputStatsShutdown(void);
 
-#endif /* SURICATA_OUTPUT_STATS_H */
+#endif /* __OUTPUT_STATS_H__ */

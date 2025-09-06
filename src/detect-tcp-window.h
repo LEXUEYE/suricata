@@ -15,8 +15,11 @@
  * 02110-1301, USA.
  */
 
-#ifndef SURICATA_DETECT_WINDOW_H
-#define SURICATA_DETECT_WINDOW_H
+#ifndef __DETECT_WINDOW_H__
+#define __DETECT_WINDOW_H__
+
+#define MIN_WINDOW_VALUE 0
+#define MAX_WINDOW_VALUE 65535
 
 typedef struct DetectWindowData_ {
     uint8_t negated;	/** negated? 1=True : 0=False */
@@ -26,4 +29,4 @@ typedef struct DetectWindowData_ {
 /* prototypes */
 void DetectWindowRegister (void);
 
-#endif /* SURICATA_DETECT_WINDOW_H */
+#endif /* __DETECT_WINDOW_H__ */

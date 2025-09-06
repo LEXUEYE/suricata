@@ -15,12 +15,14 @@
  * 02110-1301, USA.
  */
 
-#ifndef SURICATA_OUTPUT_JSON_DNP3_H
-#define SURICATA_OUTPUT_JSON_DNP3_H
+#ifndef __OUTPUT_JSON_DNP3_H__
+#define __OUTPUT_JSON_DNP3_H__
 
 #include "app-layer-dnp3.h"
 
-void JsonDNP3LogRegister(void);
-bool AlertJsonDnp3(void *vtx, SCJsonBuilder *js);
+void JsonDNP3LogRequest(JsonBuilder *js, DNP3Transaction *);
+void JsonDNP3LogResponse(JsonBuilder *js, DNP3Transaction *);
 
-#endif /* SURICATA_OUTPUT_JSON_DNP3_H */
+void JsonDNP3LogRegister(void);
+
+#endif /* __OUTPUT_JSON_DNP3_H__ */

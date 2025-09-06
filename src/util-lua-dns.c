@@ -1,4 +1,4 @@
-/* Copyright (C) 2014-2025 Open Information Security Foundation
+/* Copyright (C) 2014 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -15,6 +15,7 @@
  * 02110-1301, USA.
  */
 
+
 /**
  * \file
  *
@@ -23,150 +24,140 @@
  */
 
 #include "suricata-common.h"
-#include "util-lua-dns.h"
-#include "util-lua.h"
-#include "util-lua-common.h"
+#include "debug.h"
+#include "detect.h"
+#include "pkt-var.h"
+#include "conf.h"
+
+#include "threads.h"
+#include "threadvars.h"
+#include "tm-threads.h"
+
+#include "util-print.h"
+#include "util-unittest.h"
+
+#include "util-debug.h"
+
+#include "output.h"
+#include "app-layer.h"
+#include "app-layer-parser.h"
+#include "util-privs.h"
+#include "util-buffer.h"
+#include "util-proto-name.h"
+#include "util-logopenfile.h"
+#include "util-time.h"
 #include "rust.h"
 
-// #define DNS_MT "suricata:dns:tx"
-static const char dns_tx[] = "suricata:dns:tx";
+#ifdef HAVE_LUA
 
-struct LuaTx {
-    DNSTransaction *tx;
-};
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
 
-static int LuaDnsGetTx(lua_State *L)
+#include "util-lua.h"
+#include "util-lua-common.h"
+#include "util-lua-dns.h"
+
+static int DnsGetDnsRrname(lua_State *luastate)
 {
-    if (!(LuaStateNeedProto(L, ALPROTO_DNS))) {
-        return LuaCallbackError(L, "error: protocol not dns");
-    }
-    DNSTransaction *tx = LuaStateGetTX(L);
+    if (!(LuaStateNeedProto(luastate, ALPROTO_DNS)))
+        return LuaCallbackError(luastate, "error: protocol not dns");
+    RSDNSTransaction *tx = LuaStateGetTX(luastate);
     if (tx == NULL) {
-        return LuaCallbackError(L, "error: no tx available");
+        return LuaCallbackError(luastate, "internal error: no tx");
     }
-    struct LuaTx *ltx = (struct LuaTx *)lua_newuserdata(L, sizeof(*ltx));
-    if (ltx == NULL) {
-        return LuaCallbackError(L, "error: fail to allocate user data");
+    return rs_dns_lua_get_rrname(luastate, tx);
+}
+
+static int DnsGetTxid(lua_State *luastate)
+{
+    if (!(LuaStateNeedProto(luastate, ALPROTO_DNS)))
+        return LuaCallbackError(luastate, "error: protocol not dns");
+    RSDNSTransaction *tx = LuaStateGetTX(luastate);
+    if (tx == NULL) {
+        return LuaCallbackError(luastate, "internal error: no tx");
     }
-    ltx->tx = tx;
-
-    luaL_getmetatable(L, dns_tx);
-    lua_setmetatable(L, -2);
-
+    rs_dns_lua_get_tx_id(luastate, tx);
     return 1;
 }
 
-static int LuaDnsTxGetRrname(lua_State *L)
+static int DnsGetRcode(lua_State *luastate)
 {
-    struct LuaTx *tx = luaL_testudata(L, 1, dns_tx);
+    if (!(LuaStateNeedProto(luastate, ALPROTO_DNS)))
+        return LuaCallbackError(luastate, "error: protocol not dns");
+    RSDNSTransaction *tx = LuaStateGetTX(luastate);
     if (tx == NULL) {
-        lua_pushnil(L);
-        return 1;
+        return LuaCallbackError(luastate, "internal error: no tx");
     }
-    return SCDnsLuaGetRrname(L, tx->tx);
+    return rs_dns_lua_get_rcode(luastate, tx);
 }
 
-static int LuaDnsTxGetTxid(lua_State *L)
+static int DnsGetRecursionDesired(lua_State *luastate)
 {
-    struct LuaTx *tx = luaL_testudata(L, 1, dns_tx);
+    if (!(LuaStateNeedProto(luastate, ALPROTO_DNS)))
+        return LuaCallbackError(luastate, "error: protocol not dns");
+    RSDNSTransaction *tx = LuaStateGetTX(luastate);
     if (tx == NULL) {
-        lua_pushnil(L);
-        return 1;
+        return LuaCallbackError(luastate, "internal error: no tx");
     }
-    return SCDnsLuaGetTxId(L, tx->tx);
-}
-
-static int LuaDnsTxGetRcode(lua_State *L)
-{
-    struct LuaTx *tx = luaL_testudata(L, 1, dns_tx);
-    if (tx == NULL) {
-        lua_pushnil(L);
-        return 1;
-    }
-    return SCDnsLuaGetRcode(L, tx->tx);
-}
-
-static int LuaDnsTxGetRcodeString(lua_State *L)
-{
-    struct LuaTx *tx = luaL_testudata(L, 1, dns_tx);
-    if (tx == NULL) {
-        lua_pushnil(L);
-        return 1;
-    }
-    return SCDnsLuaGetRcodeString(L, tx->tx);
-}
-
-static int LuaDnsTxGetRecursionDesired(lua_State *L)
-{
-    struct LuaTx *tx = luaL_testudata(L, 1, dns_tx);
-    if (tx == NULL) {
-        lua_pushnil(L);
-        return 1;
-    }
-    uint16_t flags = SCDnsTxGetResponseFlags(tx->tx);
+    uint16_t flags = rs_dns_tx_get_response_flags(tx);
     int recursion_desired = flags & 0x0080 ? 1 : 0;
-    lua_pushboolean(L, recursion_desired);
+    lua_pushboolean(luastate, recursion_desired);
     return 1;
 }
 
-static int LuaDnsTxGetQueries(lua_State *L)
+static int DnsGetQueryTable(lua_State *luastate)
 {
-    struct LuaTx *tx = luaL_testudata(L, 1, dns_tx);
+    if (!(LuaStateNeedProto(luastate, ALPROTO_DNS)))
+        return LuaCallbackError(luastate, "error: protocol not dns");
+    RSDNSTransaction *tx = LuaStateGetTX(luastate);
     if (tx == NULL) {
-        lua_pushnil(L);
-        return 1;
+        return LuaCallbackError(luastate, "internal error: no tx");
     }
-    return SCDnsLuaGetQueryTable(L, tx->tx);
+    return rs_dns_lua_get_query_table(luastate, tx);
 }
 
-static int LuaDnsTxGetAnswers(lua_State *L)
+static int DnsGetAnswerTable(lua_State *luastate)
 {
-    struct LuaTx *tx = luaL_testudata(L, 1, dns_tx);
-    if (tx == NULL) {
-        lua_pushnil(L);
-        return 1;
-    }
-    return SCDnsLuaGetAnswerTable(L, tx->tx);
+    if (!(LuaStateNeedProto(luastate, ALPROTO_DNS)))
+        return LuaCallbackError(luastate, "error: protocol not dns");
+    RSDNSTransaction *tx = LuaStateGetTX(luastate);
+    return rs_dns_lua_get_answer_table(luastate, tx);
 }
 
-static int LuaDnsTxGetAuthorities(lua_State *L)
+static int DnsGetAuthorityTable(lua_State *luastate)
 {
-    struct LuaTx *tx = luaL_testudata(L, 1, dns_tx);
-    if (tx == NULL) {
-        lua_pushnil(L);
-        return 1;
-    }
-    return SCDnsLuaGetAuthorityTable(L, tx->tx);
+    if (!(LuaStateNeedProto(luastate, ALPROTO_DNS)))
+        return LuaCallbackError(luastate, "error: protocol not dns");
+    RSDNSTransaction *tx = LuaStateGetTX(luastate);
+    return rs_dns_lua_get_authority_table(luastate, tx);
 }
 
-static const struct luaL_Reg txlib[] = {
-    // clang-format off
-    { "answers", LuaDnsTxGetAnswers },
-    { "authorities", LuaDnsTxGetAuthorities },
-    { "queries", LuaDnsTxGetQueries },
-    { "rcode", LuaDnsTxGetRcode },
-    { "rcode_string", LuaDnsTxGetRcodeString },
-    { "recursion_desired", LuaDnsTxGetRecursionDesired },
-    { "rrname", LuaDnsTxGetRrname },
-    { "txid", LuaDnsTxGetTxid },
-    { NULL, NULL, }
-    // clang-format on
-};
-
-static const struct luaL_Reg dnslib[] = {
-    // clang-format off
-    { "get_tx", LuaDnsGetTx },
-    { NULL, NULL,},
-    // clang-format on
-};
-
-int SCLuaLoadDnsLib(lua_State *L)
+/** \brief register http lua extensions in a luastate */
+int LuaRegisterDnsFunctions(lua_State *luastate)
 {
-    luaL_newmetatable(L, dns_tx);
-    lua_pushvalue(L, -1);
-    lua_setfield(L, -2, "__index");
-    luaL_setfuncs(L, txlib, 0);
+    /* registration of the callbacks */
+    lua_pushcfunction(luastate, DnsGetDnsRrname);
+    lua_setglobal(luastate, "DnsGetDnsRrname");
 
-    luaL_newlib(L, dnslib);
-    return 1;
+    lua_pushcfunction(luastate, DnsGetQueryTable);
+    lua_setglobal(luastate, "DnsGetQueries");
+
+    lua_pushcfunction(luastate, DnsGetAnswerTable);
+    lua_setglobal(luastate, "DnsGetAnswers");
+
+    lua_pushcfunction(luastate, DnsGetAuthorityTable);
+    lua_setglobal(luastate, "DnsGetAuthorities");
+
+    lua_pushcfunction(luastate, DnsGetTxid);
+    lua_setglobal(luastate, "DnsGetTxid");
+
+    lua_pushcfunction(luastate, DnsGetRcode);
+    lua_setglobal(luastate, "DnsGetRcode");
+
+    lua_pushcfunction(luastate, DnsGetRecursionDesired);
+    lua_setglobal(luastate, "DnsGetRecursionDesired");
+    return 0;
 }
+
+#endif /* HAVE_LUA */

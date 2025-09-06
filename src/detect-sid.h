@@ -21,10 +21,11 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_SID_H
-#define SURICATA_DETECT_SID_H
+#ifndef __DETECT_SID_H__
+#define __DETECT_SID_H__
 
 /* prototypes */
 void DetectSidRegister (void);
 
-#endif /* SURICATA_DETECT_SID_H */
+#endif /* __DETECT_SID_H__ */
+

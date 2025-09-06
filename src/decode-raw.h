@@ -21,7 +21,8 @@
  * \author William Metcalf <william.metcalf@gmail.com>
  */
 
-#ifndef SURICATA_DECODE_RAW_H
-#define SURICATA_DECODE_RAW_H
+#ifndef __DECODE_RAW_H__
+#define __DECODE_RAW_H__
 void DecodeRawRegisterTests(void);
-#endif /* SURICATA_DECODE_RAW_H */
+#endif /* __DECODE_RAW_H__ */
+

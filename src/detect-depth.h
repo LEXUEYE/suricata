@@ -21,10 +21,11 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_DEPTH_H
-#define SURICATA_DETECT_DEPTH_H
+#ifndef __DETECT_DEPTH_H__
+#define __DETECT_DEPTH_H__
 
 /* prototypes */
 void DetectDepthRegister (void);
 
-#endif /* SURICATA_DETECT_DEPTH_H */
+#endif /* __DETECT_DEPTH_H__ */
+

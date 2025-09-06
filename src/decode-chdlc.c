@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2021 Open Information Security Foundation
+/* Copyright (C) 2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -35,15 +35,12 @@
 #include "decode-chdlc.h"
 #include "decode-events.h"
 
-#include "util-validate.h"
 #include "util-unittest.h"
 #include "util-debug.h"
 
 int DecodeCHDLC(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
                    const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
     StatsIncr(tv, dtv->counter_chdlc);
 
     if (unlikely(len < CHDLC_HEADER_LEN)) {
@@ -59,6 +56,8 @@ int DecodeCHDLC(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
     }
 
     CHDLCHdr *hdr = (CHDLCHdr *)pkt;
+    if (unlikely(hdr == NULL))
+        return TM_ECODE_FAILED;
 
     SCLogDebug("p %p pkt %p ether type %04x", p, pkt, SCNtohs(hdr->protocol));
 
@@ -78,18 +77,20 @@ static int DecodeCHDLCTest01 (void)
         0x00,0x00,0x70,0x02,0x40,0x00,0x11,0x47,0x00,0x00,
         0x02,0x04,0x05,0xb4,0x01,0x01,0x04,0x02 };
 
-    Packet *p = PacketGetFromAlloc();
-    FAIL_IF_NULL(p);
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
+    if (unlikely(p == NULL))
+        return 0;
     ThreadVars tv;
     DecodeThreadVars dtv;
 
     memset(&dtv, 0, sizeof(DecodeThreadVars));
     memset(&tv,  0, sizeof(ThreadVars));
+    memset(p, 0, SIZE_OF_PACKET);
 
     DecodeCHDLC(&tv, &dtv, p, raw, sizeof(raw));
 
-    FAIL_IF_NOT(PacketIsIPv4(p));
-    FAIL_IF_NOT(PacketIsTCP(p));
+    FAIL_IF_NOT(PKT_IS_IPV4(p));
+    FAIL_IF_NOT(PKT_IS_TCP(p));
     FAIL_IF_NOT(p->dp == 80);
 
     SCFree(p);

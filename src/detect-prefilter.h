@@ -21,10 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_PREFILTER_H
-#define SURICATA_DETECT_PREFILTER_H
+#ifndef __DETECT_PREFILTER_H__
+#define __DETECT_PREFILTER_H__
 
 /* prototypes */
 void DetectPrefilterRegister (void);
 
-#endif /* SURICATA_DETECT_PREFILTER_H */
+#endif /* __DETECT_PREFILTER_H__ */

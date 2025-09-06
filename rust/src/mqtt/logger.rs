@@ -17,36 +17,34 @@
 
 // written by Sascha Steinbiss <sascha@steinbiss.name>
 
-use super::mqtt::MQTTTransaction;
+use std;
+use super::mqtt::{MQTTTransaction, MQTTState};
 use crate::jsonbuilder::{JsonBuilder, JsonError};
 use crate::mqtt::mqtt_message::{MQTTOperation, MQTTSubscribeTopicData};
-use crate::mqtt::parser::FixedHeader;
-use std;
+use crate::mqtt::parser::{FixedHeader};
 
 pub const MQTT_LOG_PASSWORDS: u32 = BIT_U32!(0);
 
 #[inline]
-fn log_mqtt_topic(
-    js: &mut JsonBuilder, t: &MQTTSubscribeTopicData, max_log_len: usize,
-) -> Result<(), JsonError> {
+fn log_mqtt_topic(js: &mut JsonBuilder, t: &MQTTSubscribeTopicData) -> Result<(), JsonError>
+{
     js.start_object()?;
-    js.set_string_limited("topic", &t.topic_name, max_log_len)?;
+    js.set_string("topic", &t.topic_name)?;
     js.set_uint("qos", t.qos as u64)?;
     js.close()?;
     return Ok(());
 }
 
 #[inline]
-fn log_mqtt_header(js: &mut JsonBuilder, hdr: &FixedHeader) -> Result<(), JsonError> {
+fn log_mqtt_header(js: &mut JsonBuilder, hdr: &FixedHeader) -> Result<(), JsonError>
+{
     js.set_uint("qos", hdr.qos_level as u64)?;
     js.set_bool("retain", hdr.retain)?;
     js.set_bool("dup", hdr.dup_flag)?;
     return Ok(());
 }
 
-fn log_mqtt(
-    tx: &MQTTTransaction, flags: u32, max_log_len: usize, js: &mut JsonBuilder,
-) -> Result<(), JsonError> {
+fn log_mqtt(tx: &MQTTTransaction, flags: u32, js: &mut JsonBuilder) -> Result<(), JsonError> {
     js.open_object("mqtt")?;
     for msg in tx.msg.iter() {
         match msg.op {
@@ -55,7 +53,7 @@ fn log_mqtt(
                 log_mqtt_header(js, &msg.header)?;
                 js.set_string("protocol_string", &conn.protocol_string)?;
                 js.set_uint("protocol_version", conn.protocol_version as u64)?;
-                js.set_string_limited("client_id", &conn.client_id, max_log_len)?;
+                js.set_string("client_id", &conn.client_id)?;
                 js.open_object("flags")?;
                 js.set_bool("username", conn.username_flag)?;
                 js.set_bool("password", conn.password_flag)?;
@@ -64,7 +62,7 @@ fn log_mqtt(
                 js.set_bool("clean_session", conn.clean_session)?;
                 js.close()?; // flags
                 if let Some(user) = &conn.username {
-                    js.set_string_limited("username", user, max_log_len)?;
+                    js.set_string("username", user)?;
                 }
                 if flags & MQTT_LOG_PASSWORDS != 0 {
                     if let Some(pass) = &conn.password {
@@ -74,19 +72,15 @@ fn log_mqtt(
                 if conn.will_flag {
                     js.open_object("will")?;
                     if let Some(will_topic) = &conn.will_topic {
-                        js.set_string_limited("topic", will_topic, max_log_len)?;
+                        js.set_string("topic", will_topic)?;
                     }
                     if let Some(will_message) = &conn.will_message {
-                        js.set_string_from_bytes_limited(
-                            "message",
-                            will_message,
-                            max_log_len,
-                        )?;
+                        js.set_string_from_bytes("message", will_message)?;
                     }
                     if let Some(will_properties) = &conn.will_properties {
                         js.open_object("properties")?;
                         for prop in will_properties {
-                            prop.set_json(js, max_log_len)?;
+                            prop.set_json(js)?;
                         }
                         js.close()?; // properties
                     }
@@ -95,7 +89,7 @@ fn log_mqtt(
                 if let Some(properties) = &conn.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
@@ -109,7 +103,7 @@ fn log_mqtt(
                 if let Some(properties) = &connack.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
@@ -118,19 +112,15 @@ fn log_mqtt(
             MQTTOperation::PUBLISH(ref publish) => {
                 js.open_object("publish")?;
                 log_mqtt_header(js, &msg.header)?;
-                js.set_string_limited("topic", &publish.topic, max_log_len)?;
+                js.set_string("topic", &publish.topic)?;
                 if let Some(message_id) = publish.message_id {
                     js.set_uint("message_id", message_id as u64)?;
                 }
-                js.set_string_from_bytes_limited(
-                    "message",
-                    &publish.message,
-                    max_log_len,
-                )?;
+                js.set_string_from_bytes("message", &publish.message)?;
                 if let Some(properties) = &publish.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
@@ -146,7 +136,7 @@ fn log_mqtt(
                 if let Some(properties) = &msgidonly.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
@@ -162,7 +152,7 @@ fn log_mqtt(
                 if let Some(properties) = &msgidonly.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
@@ -178,7 +168,7 @@ fn log_mqtt(
                 if let Some(properties) = &msgidonly.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
@@ -194,7 +184,7 @@ fn log_mqtt(
                 if let Some(properties) = &msgidonly.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
@@ -205,22 +195,14 @@ fn log_mqtt(
                 log_mqtt_header(js, &msg.header)?;
                 js.set_uint("message_id", subs.message_id as u64)?;
                 js.open_array("topics")?;
-                let mut topic_chars : usize = 0;
-                // We only log topics until the length of the concatenation of
-                // the topic names exceed the log limit set.
                 for t in &subs.topics {
-                    if topic_chars + std::cmp::min(t.topic_name.len(), max_log_len) > max_log_len {
-                        log_mqtt_topic(js, t, max_log_len - topic_chars)?;
-                        break;
-                    }
-                    log_mqtt_topic(js, t, max_log_len)?;
-                    topic_chars += std::cmp::min(t.topic_name.len(), max_log_len);
+                    log_mqtt_topic(js, t)?;
                 }
                 js.close()?; //topics
                 if let Some(properties) = &subs.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
@@ -253,13 +235,11 @@ fn log_mqtt(
                 log_mqtt_header(js, &msg.header)?;
                 js.set_uint("message_id", unsuback.message_id as u64)?;
                 if let Some(codes) = &unsuback.reason_codes {
-                    if !codes.is_empty() {
-                        js.open_array("reason_codes")?;
-                        for t in codes {
-                            js.append_uint(*t as u64)?;
-                        }
-                        js.close()?; // reason_codes
+                    js.open_array("reason_codes")?;
+                    for t in codes {
+                        js.append_uint(*t as u64)?;
                     }
+                    js.close()?; // reason_codes
                 }
                 js.close()?; // unsuback
             }
@@ -267,12 +247,12 @@ fn log_mqtt(
                 js.open_object("pingreq")?;
                 log_mqtt_header(js, &msg.header)?;
                 js.close()?; // pingreq
-            }
+            },
             MQTTOperation::PINGRESP => {
                 js.open_object("pingresp")?;
                 log_mqtt_header(js, &msg.header)?;
                 js.close()?; // pingresp
-            }
+            },
             MQTTOperation::AUTH(ref auth) => {
                 js.open_object("auth")?;
                 log_mqtt_header(js, &msg.header)?;
@@ -280,12 +260,12 @@ fn log_mqtt(
                 if let Some(properties) = &auth.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
                 js.close()?; // auth
-            }
+            },
             MQTTOperation::DISCONNECT(ref disco) => {
                 js.open_object("disconnect")?;
                 log_mqtt_header(js, &msg.header)?;
@@ -295,20 +275,20 @@ fn log_mqtt(
                 if let Some(properties) = &disco.properties {
                     js.open_object("properties")?;
                     for prop in properties {
-                        prop.set_json(js, max_log_len)?;
+                        prop.set_json(js)?;
                     }
                     js.close()?; // properties
                 }
                 js.close()?; // disconnect
-            }
+            },
             MQTTOperation::TRUNCATED(ref trunc) => {
                 js.open_object(&trunc.original_message_type.to_lower_str())?;
                 log_mqtt_header(js, &msg.header)?;
                 js.set_bool("truncated", true)?;
                 js.set_uint("skipped_length", trunc.skipped_length as u64)?;
                 js.close()?; // truncated
-            }
-            MQTTOperation::UNASSIGNED => {}
+            },
+            MQTTOperation::UNASSIGNED => {},
         }
     }
     js.close()?; // mqtt
@@ -317,9 +297,7 @@ fn log_mqtt(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn SCMqttLoggerLog(
-    tx: *mut std::os::raw::c_void, flags: u32, max_log_len: u32, js: &mut JsonBuilder,
-) -> bool {
+pub extern "C" fn rs_mqtt_logger_log(_state: &mut MQTTState, tx: *mut std::os::raw::c_void, flags: u32, js: &mut JsonBuilder) -> bool {
     let tx = cast_pointer!(tx, MQTTTransaction);
-    log_mqtt(tx, flags, max_log_len as usize, js).is_ok()
+    log_mqtt(tx, flags, js).is_ok()
 }

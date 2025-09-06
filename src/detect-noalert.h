@@ -21,10 +21,11 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_NOALERT_H
-#define SURICATA_DETECT_NOALERT_H
+#ifndef __DETECT_NOALERT_H__
+#define __DETECT_NOALERT_H__
 
 /* prototypes */
 void DetectNoalertRegister (void);
 
-#endif /* SURICATA_DETECT_NOALERT_H */
+#endif /* __DETECT_NOALERT_H__ */
+

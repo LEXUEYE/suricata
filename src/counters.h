@@ -22,10 +22,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_COUNTERS_H
-#define SURICATA_COUNTERS_H
-
-#include "threads.h"
+#ifndef __COUNTERS_H__
+#define __COUNTERS_H__
 
 /* forward declaration of the ThreadVars structure */
 struct ThreadVars_;
@@ -43,7 +41,7 @@ typedef struct StatsCounter_ {
     uint16_t gid;
 
     /* counter value(s): copies from the 'private' counter */
-    int64_t value;      /**< sum of updates/increments, or 'set' value */
+    uint64_t value;     /**< sum of updates/increments, or 'set' value */
     uint64_t updates;   /**< number of updates (for avg) */
 
     /* when using type STATS_TYPE_Q_FUNC this function is called once
@@ -52,7 +50,6 @@ typedef struct StatsCounter_ {
 
     /* name of the counter */
     const char *name;
-    const char *short_name;
 
     /* the next perfcounter for this tv's tm instance */
     struct StatsCounter_ *next;
@@ -63,7 +60,7 @@ typedef struct StatsCounter_ {
  */
 typedef struct StatsPublicThreadContext_ {
     /* flag set by the wakeup thread, to inform the client threads to sync */
-    SC_ATOMIC_DECLARE(bool, sync_now);
+    uint32_t perf_flag;
 
     /* pointer to the head of a list of counters assigned under this context */
     StatsCounter *head;
@@ -87,7 +84,7 @@ typedef struct StatsLocalCounter_ {
     uint16_t id;
 
     /* total value of the adds/increments, or exact value in case of 'set' */
-    int64_t value;
+    uint64_t value;
 
     /* no of times the local counter has been updated */
     uint64_t updates;
@@ -114,7 +111,7 @@ void StatsSpawnThreads(void);
 void StatsRegisterTests(void);
 bool StatsEnabled(void);
 
-/* functions used to free the resources allotted by the Stats API */
+/* functions used to free the resources alloted by the Stats API */
 void StatsReleaseResources(void);
 
 /* counter registration functions */
@@ -127,7 +124,6 @@ uint16_t StatsRegisterGlobalCounter(const char *cname, uint64_t (*Func)(void));
 void StatsAddUI64(struct ThreadVars_ *, uint16_t, uint64_t);
 void StatsSetUI64(struct ThreadVars_ *, uint16_t, uint64_t);
 void StatsIncr(struct ThreadVars_ *, uint16_t);
-void StatsDecr(struct ThreadVars_ *, uint16_t);
 
 /* utility functions */
 int StatsUpdateCounterArray(StatsPrivateThreadContext *, StatsPublicThreadContext *);
@@ -135,12 +131,21 @@ uint64_t StatsGetLocalCounterValue(struct ThreadVars_ *, uint16_t);
 int StatsSetupPrivate(struct ThreadVars_ *);
 void StatsThreadCleanup(struct ThreadVars_ *);
 
-void StatsSyncCounters(struct ThreadVars_ *tv);
-void StatsSyncCountersIfSignalled(struct ThreadVars_ *tv);
+#define StatsSyncCounters(tv) \
+    StatsUpdateCounterArray(&(tv)->perf_private_ctx, &(tv)->perf_public_ctx);  \
+
+#define StatsSyncCountersIfSignalled(tv)                                       \
+    do {                                                                        \
+        if ((tv)->perf_public_ctx.perf_flag == 1) {                             \
+            StatsUpdateCounterArray(&(tv)->perf_private_ctx,                   \
+                                     &(tv)->perf_public_ctx);                   \
+        }                                                                       \
+    } while (0)
 
 #ifdef BUILD_UNIX_SOCKET
 TmEcode StatsOutputCounterSocket(json_t *cmd,
                                  json_t *answer, void *data);
 #endif
 
-#endif /* SURICATA_COUNTERS_H */
+#endif /* __COUNTERS_H__ */
+

@@ -21,16 +21,10 @@
  * \author Eric Leblond <eric@regit.org>
  */
 
-#ifndef SURICATA_UTIL_AFFINITY_H
-#define SURICATA_UTIL_AFFINITY_H
+#ifndef __UTIL_AFFINITY_H__
+#define __UTIL_AFFINITY_H__
 #include "suricata-common.h"
 #include "conf.h"
-#include "threads.h"
-#include "threadvars.h"
-
-#ifdef HAVE_HWLOC
-#include <hwloc.h>
-#endif /* HAVE_HWLOC */
 
 #if defined OS_FREEBSD
 #include <sched.h>
@@ -67,13 +61,13 @@ enum {
     MAX_AFFINITY
 };
 
-#define MAX_NUMA_NODES 16
-
 typedef struct ThreadsAffinityType_ {
     const char *name;
-    struct ThreadsAffinityType_ **children;
-    struct ThreadsAffinityType_ *parent; // e.g. worker-cpu-set for interfaces
+    uint8_t mode_flag;
+    int prio;
+    uint32_t nb_threads;
     SCMutex taf_mutex;
+    uint16_t lcpu; /* use by exclusive mode */
 
 #if !defined __CYGWIN__ && !defined OS_WIN32 && !defined __OpenBSD__ && !defined sun
     cpu_set_t cpu_set;
@@ -81,14 +75,6 @@ typedef struct ThreadsAffinityType_ {
     cpu_set_t medprio_cpu;
     cpu_set_t hiprio_cpu;
 #endif
-    int prio;
-    uint32_t nb_threads;
-    uint32_t nb_children;
-    uint32_t nb_children_capacity;
-    uint16_t lcpu[MAX_NUMA_NODES]; /* use by exclusive mode */
-    uint8_t mode_flag;
-    // a flag to avoid multiple warnings when no CPU is set
-    bool nocpu_warned;
 } ThreadsAffinityType;
 
 /** store thread affinity mode for all type of threads */
@@ -96,27 +82,13 @@ typedef struct ThreadsAffinityType_ {
 extern ThreadsAffinityType thread_affinity[MAX_CPU_SET];
 #endif
 
-char *AffinityGetYamlPath(ThreadsAffinityType *taf);
 void AffinitySetupLoadFromConfig(void);
-ThreadsAffinityType *GetOrAllocAffinityTypeForIfaceOfName(
-        const char *name, const char *interface_name);
-ThreadsAffinityType *GetAffinityTypeForNameAndIface(const char *name, const char *interface_name);
-ThreadsAffinityType *FindAffinityByInterface(
-        ThreadsAffinityType *parent, const char *interface_name);
+ThreadsAffinityType * GetAffinityTypeFromName(const char *name);
 
-void TopologyDestroy(void);
-uint16_t AffinityGetNextCPU(ThreadVars *tv, ThreadsAffinityType *taf);
-uint16_t UtilAffinityGetAffinedCPUNum(ThreadsAffinityType *taf);
-#ifdef HAVE_DPDK
-uint16_t UtilAffinityCpusOverlap(ThreadsAffinityType *taf1, ThreadsAffinityType *taf2);
-void UtilAffinityCpusExclude(ThreadsAffinityType *mod_taf, ThreadsAffinityType *static_taf);
-#endif /* HAVE_DPDK */
+int AffinityGetNextCPU(ThreadsAffinityType *taf);
 
-int BuildCpusetWithCallback(
-        const char *name, SCConfNode *node, void (*Callback)(int i, void *data), void *data);
+void BuildCpusetWithCallback(const char *name, ConfNode *node,
+                             void (*Callback)(int i, void * data),
+                             void *data);
 
-#ifdef UNITTESTS
-void ThreadingAffinityRegisterTests(void);
-#endif
-
-#endif /* SURICATA_UTIL_AFFINITY_H */
+#endif /* __UTIL_AFFINITY_H__ */

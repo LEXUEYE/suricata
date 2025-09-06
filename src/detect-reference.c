@@ -43,10 +43,7 @@
 #include "util-byte.h"
 #include "util-debug.h"
 
-/* Breakout key and scheme (optional) and domain/path (mandatory) */
-#define PARSE_REGEX                                                                                \
-    "^\\s*([A-Za-z0-9]+)\\s*,\"?\\s*\"?\\s*([a-zA-Z]+:\\/\\/)?([a-zA-Z0-9\\-_\\.\\/"               \
-    "\\?\\=]+)\"?\\s*\"?"
+#define PARSE_REGEX "^\\s*([A-Za-z0-9]+)\\s*,\"?\\s*\"?\\s*([a-zA-Z0-9\\-_\\.\\/\\?\\=]+)\"?\\s*\"?"
 
 static DetectParseRegex parse_regex;
 
@@ -77,9 +74,6 @@ void DetectReferenceFree(DetectReference *ref)
 {
     SCEnter();
 
-    if (ref->key)
-        SCFree(ref->key);
-
     if (ref->reference != NULL) {
         SCFree(ref->reference);
     }
@@ -101,104 +95,72 @@ static DetectReference *DetectReferenceParse(const char *rawstr, DetectEngineCtx
 {
     SCEnter();
 
-    int res = 0;
-    size_t pcre2len;
+    int ret = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
     char key[REFERENCE_SYSTEM_NAME_MAX] = "";
-    char scheme[REFERENCE_SYSTEM_NAME_MAX] = "";
-    char uri[REFERENCE_CONTENT_NAME_MAX] = "";
+    char content[REFERENCE_CONTENT_NAME_MAX] = "";
 
-    pcre2_match_data *match = NULL;
-    int ret = DetectParsePcreExec(&parse_regex, &match, rawstr, 0, 0);
-    if (ret != 4) {
-        SCLogError("Unable to parse \"reference\" "
-                   "keyword argument - \"%s\".   Invalid argument.",
-                rawstr);
-        if (match) {
-            pcre2_match_data_free(match);
-        }
+    ret = DetectParsePcreExec(&parse_regex, rawstr, 0, 0, ov, MAX_SUBSTRINGS);
+    if (ret < 2) {
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "Unable to parse \"reference\" "
+                   "keyword argument - \"%s\".   Invalid argument.", rawstr);
         return NULL;
     }
 
     DetectReference *ref = SCCalloc(1, sizeof(DetectReference));
     if (unlikely(ref == NULL)) {
-        pcre2_match_data_free(match);
         return NULL;
     }
 
-    /* Position 1 = key (mandatory) */
-    pcre2len = sizeof(key);
-    res = pcre2_substring_copy_bynumber(match, 1, (PCRE2_UCHAR8 *)key, &pcre2len);
+    res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 1, key, sizeof(key));
     if (res < 0) {
-        SCLogError("pcre2_substring_copy_bynumber key failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
         goto error;
     }
 
-    /* Position 2 = scheme (optional) */
-    pcre2len = sizeof(scheme);
-    (void)pcre2_substring_copy_bynumber(match, 2, (PCRE2_UCHAR8 *)scheme, &pcre2len);
-
-    /* Position 3 = domain-path (mandatory) */
-    pcre2len = sizeof(uri);
-    res = pcre2_substring_copy_bynumber(match, 3, (PCRE2_UCHAR8 *)uri, &pcre2len);
+    res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 2, content, sizeof(content));
     if (res < 0) {
-        SCLogError("pcre2_substring_copy_bynumber domain-path failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
         goto error;
     }
 
-    size_t ref_len = strlen(uri);
-    /* no key, reference -- return an error */
-    if (strlen(key) == 0 || ref_len == 0)
+    if (strlen(key) == 0 || strlen(content) == 0)
         goto error;
 
-    if (strlen(scheme)) {
-        SCLogConfig("scheme value %s overrides key %s", scheme, key);
-        ref->key = SCStrdup(scheme);
-        /* already bound checked to be REFERENCE_SYSTEM_NAME_MAX or less */
-        ref->key_len = (uint16_t)strlen(scheme);
+    SCRConfReference *lookup_ref_conf = SCRConfGetReference(key, de_ctx);
+    if (lookup_ref_conf != NULL) {
+        ref->key = lookup_ref_conf->url;
     } else {
-
-        SCRConfReference *lookup_ref_conf = SCRConfGetReference(key, de_ctx);
-        if (lookup_ref_conf != NULL) {
-            ref->key = SCStrdup(lookup_ref_conf->url);
-            /* already bound checked to be REFERENCE_SYSTEM_NAME_MAX or less */
-            ref->key_len = (uint16_t)strlen(ref->key);
-        } else {
-            if (SigMatchStrictEnabled(DETECT_REFERENCE)) {
-                SCLogError("unknown reference key \"%s\"", key);
-                goto error;
-            }
-
-            SCLogWarning("unknown reference key \"%s\"", key);
-
-            char str[2048];
-            snprintf(str, sizeof(str), "config reference: %s undefined\n", key);
-
-            if (SCRConfAddReference(de_ctx, str) < 0)
-                goto error;
-            lookup_ref_conf = SCRConfGetReference(key, de_ctx);
-            if (lookup_ref_conf == NULL)
-                goto error;
+        if (SigMatchStrictEnabled(DETECT_REFERENCE)) {
+            SCLogError(SC_ERR_REFERENCE_UNKNOWN,
+                    "unknown reference key \"%s\"", key);
+            goto error;
         }
+
+        SCLogWarning(SC_ERR_REFERENCE_UNKNOWN,
+                "unknown reference key \"%s\"", key);
+
+        char str[2048];
+        snprintf(str, sizeof(str), "config reference: %s undefined\n", key);
+
+        if (SCRConfAddReference(de_ctx, str) < 0)
+            goto error;
+        lookup_ref_conf = SCRConfGetReference(key, de_ctx);
+        if (lookup_ref_conf == NULL)
+            goto error;
     }
 
     /* make a copy so we can free pcre's substring */
-    ref->reference = SCStrdup(uri);
+    ref->reference = SCStrdup(content);
     if (ref->reference == NULL) {
-        SCLogError("strdup failed: %s", strerror(errno));
+        SCLogError(SC_ERR_MEM_ALLOC, "strdup failed: %s", strerror(errno));
         goto error;
     }
 
-    /* already bound checked to be REFERENCE_CONTENT_NAME_MAX or less */
-    ref->reference_len = (uint16_t)ref_len;
-
-    pcre2_match_data_free(match);
     /* free the substrings */
     SCReturnPtr(ref, "Reference");
 
 error:
-    if (match) {
-        pcre2_match_data_free(match);
-    }
     DetectReferenceFree(ref);
     SCReturnPtr(NULL, "Reference");
 }
@@ -249,7 +211,7 @@ static int DetectReferenceSetup(DetectEngineCtx *de_ctx, Signature *s,
 /**
  * \test one valid reference.
  *
- *  \retval 1 on success.
+ *  \retval 1 on succces.
  *  \retval 0 on failure.
  */
 static int DetectReferenceParseTest01(void)
@@ -278,7 +240,7 @@ static int DetectReferenceParseTest01(void)
 /**
  * \test for two valid references.
  *
- *  \retval 1 on success.
+ *  \retval 1 on succces.
  *  \retval 0 on failure.
  */
 static int DetectReferenceParseTest02(void)
@@ -314,7 +276,7 @@ static int DetectReferenceParseTest02(void)
 /**
  * \test parsing: invalid reference.
  *
- *  \retval 1 on success.
+ *  \retval 1 on succces.
  *  \retval 0 on failure.
  */
 static int DetectReferenceParseTest03(void)

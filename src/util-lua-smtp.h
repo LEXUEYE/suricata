@@ -1,4 +1,4 @@
-/* Copyright (C) 2014-2025 Open Information Security Foundation
+/* Copyright (C) 2014 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -15,11 +15,13 @@
  * 02110-1301, USA.
  */
 
-#ifndef SURICATA_UTIL_LUA_SMTP_H
-#define SURICATA_UTIL_LUA_SMTP_H
+#ifndef __UTIL_LUA_SMTP_H__
+#define __UTIL_LUA_SMTP_H__
 
-#include "lua.h"
+#ifdef HAVE_LUA
 
-int SCLuaLoadSmtpLib(lua_State *L);
+int LuaRegisterSmtpFunctions(lua_State *luastate);
 
-#endif /* SURICATA_UTIL_LUA_SMTP_H */
+#endif /* HAVE_LUA */
+
+#endif /* __UTIL_LUA_SMTP_H__ */

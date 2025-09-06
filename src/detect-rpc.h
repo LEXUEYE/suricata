@@ -21,8 +21,8 @@
  * \author Pablo Rincon <pablo.rincon.crespo@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_RPC_H
-#define SURICATA_DETECT_RPC_H
+#ifndef __DETECT_RPC_H__
+#define __DETECT_RPC_H__
 
 /* At least we check the program, the version is optional,
  * and the procedure is optional if we are checking the version.
@@ -41,6 +41,9 @@ typedef struct RpcMsg_ {
      uint32_t proc;
 } RpcMsg;
 
+/* Extract uint32_t */
+#define EXT_GET_UINT32T(buf)      ((long)SCNtohl((long)*(buf)++))
+
 typedef struct DetectRpcData_ {
     uint32_t program;
     uint32_t program_version;
@@ -51,4 +54,5 @@ typedef struct DetectRpcData_ {
 /* prototypes */
 void DetectRpcRegister (void);
 
-#endif /* SURICATA_DETECT_RPC_H */
+#endif /* __DETECT_RPC_H__ */
+

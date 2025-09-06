@@ -1,4 +1,4 @@
-/* Copyright (C) 2016-2024 Open Information Security Foundation
+/* Copyright (C) 2016 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,8 +21,8 @@
  * \author Paulo Pacheco <fooinha@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_LOG_REDIS_H
-#define SURICATA_UTIL_LOG_REDIS_H
+#ifndef __UTIL_LOG_REDIS_H__
+#define __UTIL_LOG_REDIS_H__
 
 #ifdef HAVE_LIBHIREDIS
 #include <hiredis/hiredis.h>
@@ -38,14 +38,12 @@ enum RedisMode { REDIS_LIST, REDIS_CHANNEL };
 
 typedef struct RedisSetup_ {
     enum RedisMode mode;
-    const char *format;
     const char *command;
     const char *key;
     const char *server;
     uint16_t  port;
     int is_async;
     int  batch_size;
-    char *stream_format;
 } RedisSetup;
 
 typedef struct SCLogRedisContext_ {
@@ -61,8 +59,8 @@ typedef struct SCLogRedisContext_ {
 } SCLogRedisContext;
 
 void SCLogRedisInit(void);
-int SCConfLogOpenRedis(SCConfNode *, void *);
+int SCConfLogOpenRedis(ConfNode *, void *);
 int LogFileWriteRedis(void *, const char *, size_t);
 
 #endif /* HAVE_LIBHIREDIS */
-#endif /* SURICATA_UTIL_LOG_REDIS_H */
+#endif /* __UTIL_LOG_REDIS_H__ */

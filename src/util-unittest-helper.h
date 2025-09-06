@@ -21,25 +21,14 @@
  * \author Pablo Rincon Crespo <pablo.rincon.crespo@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_UNITTEST_HELPER
-#define SURICATA_UTIL_UNITTEST_HELPER
-
-#if defined(UNITTESTS)
-#include "flow.h"
-#include "detect.h"
-#elif defined(FUZZ)
-#include "flow.h"
-#endif
+#ifndef __UTIL_UNITTEST_HELPER__
+#define __UTIL_UNITTEST_HELPER__
 
 #if defined(UNITTESTS) || defined(FUZZ)
 Flow *TestHelperBuildFlow(int family, const char *src, const char *dst, Port sp, Port dp);
 int TestHelperBufferToFile(const char *name, const uint8_t *data, size_t size);
 #endif
 #ifdef UNITTESTS
-void UTHSetIPV4Hdr(Packet *p, IPV4Hdr *ip4h);
-void UTHSetIPV6Hdr(Packet *p, IPV6Hdr *ip6h);
-void UTHSetTCPHdr(Packet *p, TCPHdr *tcph);
-
 uint32_t UTHSetIPv4Address(const char *);
 
 Packet *UTHBuildPacketReal(uint8_t *, uint16_t, uint8_t ipproto, const char *, const char *, uint16_t, uint16_t);
@@ -50,6 +39,7 @@ Packet *UTHBuildPacketSrcDstPorts(uint8_t *, uint16_t, uint8_t ipproto, uint16_t
 Packet *UTHBuildPacketIPV6SrcDst(uint8_t *, uint16_t, uint8_t ipproto, const char *, const char *);
 
 int UTHPacketMatchSigMpm(Packet *, char *, uint16_t);
+Packet **UTHBuildPacketArrayFromEth(uint8_t **, int *, int);
 Packet *UTHBuildPacketFromEth(uint8_t *, uint16_t);
 
 void UTHFreePacket(Packet *);
@@ -81,4 +71,4 @@ int UTHParseSignature(const char *str, bool expect);
 
 void UTHRegisterTests(void);
 
-#endif /* SURICATA_UTIL_UNITTEST_HELPER */
+#endif /* __UTIL_UNITTEST_HELPER__ */

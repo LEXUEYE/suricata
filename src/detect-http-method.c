@@ -32,12 +32,12 @@
 
 #include "suricata-common.h"
 #include "threads.h"
+#include "debug.h"
 #include "decode.h"
 #include "detect.h"
 
 #include "detect-parse.h"
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-prefilter.h"
 #include "detect-content.h"
@@ -66,8 +66,7 @@ static int DetectHttpMethodSetupSticky(DetectEngineCtx *de_ctx, Signature *s, co
 void DetectHttpMethodRegisterTests(void);
 #endif
 void DetectHttpMethodFree(void *);
-static bool DetectHttpMethodValidateCallback(
-        const Signature *s, const char **sigerror, const DetectBufferType *dbt);
+static bool DetectHttpMethodValidateCallback(const Signature *s, const char **sigerror);
 static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
         const DetectEngineTransforms *transforms, Flow *_f,
         const uint8_t _flow_flags, void *txv, const int list_id);
@@ -81,17 +80,16 @@ static InspectionBuffer *GetData2(DetectEngineThreadCtx *det_ctx,
 void DetectHttpMethodRegister(void)
 {
     /* http_method content modifier */
-    sigmatch_table[DETECT_HTTP_METHOD_CM].name = "http_method";
-    sigmatch_table[DETECT_HTTP_METHOD_CM].desc =
-            "content modifier to match only on the HTTP method-buffer";
-    sigmatch_table[DETECT_HTTP_METHOD_CM].url = "/rules/http-keywords.html#http-method";
-    sigmatch_table[DETECT_HTTP_METHOD_CM].Match = NULL;
-    sigmatch_table[DETECT_HTTP_METHOD_CM].Setup = DetectHttpMethodSetup;
+    sigmatch_table[DETECT_AL_HTTP_METHOD].name = "http_method";
+    sigmatch_table[DETECT_AL_HTTP_METHOD].desc = "content modifier to match only on the HTTP method-buffer";
+    sigmatch_table[DETECT_AL_HTTP_METHOD].url = "/rules/http-keywords.html#http-method";
+    sigmatch_table[DETECT_AL_HTTP_METHOD].Match = NULL;
+    sigmatch_table[DETECT_AL_HTTP_METHOD].Setup = DetectHttpMethodSetup;
 #ifdef UNITTESTS
-    sigmatch_table[DETECT_HTTP_METHOD_CM].RegisterTests = DetectHttpMethodRegisterTests;
+    sigmatch_table[DETECT_AL_HTTP_METHOD].RegisterTests = DetectHttpMethodRegisterTests;
 #endif
-    sigmatch_table[DETECT_HTTP_METHOD_CM].flags |= SIGMATCH_NOOPT | SIGMATCH_INFO_CONTENT_MODIFIER;
-    sigmatch_table[DETECT_HTTP_METHOD_CM].alternative = DETECT_HTTP_METHOD;
+    sigmatch_table[DETECT_AL_HTTP_METHOD].flags |= SIGMATCH_NOOPT|SIGMATCH_INFO_CONTENT_MODIFIER;
+    sigmatch_table[DETECT_AL_HTTP_METHOD].alternative = DETECT_HTTP_METHOD;
 
     /* http.method sticky buffer */
     sigmatch_table[DETECT_HTTP_METHOD].name = "http.method";
@@ -100,16 +98,18 @@ void DetectHttpMethodRegister(void)
     sigmatch_table[DETECT_HTTP_METHOD].Setup = DetectHttpMethodSetupSticky;
     sigmatch_table[DETECT_HTTP_METHOD].flags |= SIGMATCH_NOOPT|SIGMATCH_INFO_STICKY_BUFFER;
 
-    DetectAppLayerInspectEngineRegister("http_method", ALPROTO_HTTP1, SIG_FLAG_TOSERVER,
-            HTP_REQUEST_PROGRESS_LINE, DetectEngineInspectBufferGeneric, GetData);
+    DetectAppLayerInspectEngineRegister2("http_method", ALPROTO_HTTP,
+            SIG_FLAG_TOSERVER, HTP_REQUEST_LINE,
+            DetectEngineInspectBufferGeneric, GetData);
 
-    DetectAppLayerMpmRegister("http_method", SIG_FLAG_TOSERVER, 4, PrefilterGenericMpmRegister,
-            GetData, ALPROTO_HTTP1, HTP_REQUEST_PROGRESS_LINE);
+    DetectAppLayerMpmRegister2("http_method", SIG_FLAG_TOSERVER, 4,
+            PrefilterGenericMpmRegister, GetData, ALPROTO_HTTP,
+            HTP_REQUEST_LINE);
 
-    DetectAppLayerInspectEngineRegister("http_method", ALPROTO_HTTP2, SIG_FLAG_TOSERVER,
+    DetectAppLayerInspectEngineRegister2("http_method", ALPROTO_HTTP2, SIG_FLAG_TOSERVER,
             HTTP2StateDataClient, DetectEngineInspectBufferGeneric, GetData2);
 
-    DetectAppLayerMpmRegister("http_method", SIG_FLAG_TOSERVER, 4, PrefilterGenericMpmRegister,
+    DetectAppLayerMpmRegister2("http_method", SIG_FLAG_TOSERVER, 4, PrefilterGenericMpmRegister,
             GetData2, ALPROTO_HTTP2, HTTP2StateDataClient);
 
     DetectBufferTypeSetDescriptionByName("http_method",
@@ -136,8 +136,10 @@ void DetectHttpMethodRegister(void)
  */
 static int DetectHttpMethodSetup(DetectEngineCtx *de_ctx, Signature *s, const char *str)
 {
-    return DetectEngineContentModifierBufferSetup(
-            de_ctx, s, str, DETECT_HTTP_METHOD_CM, g_http_method_buffer_id, ALPROTO_HTTP1);
+    return DetectEngineContentModifierBufferSetup(de_ctx, s, str,
+                                                  DETECT_AL_HTTP_METHOD,
+                                                  g_http_method_buffer_id,
+                                                  ALPROTO_HTTP);
 }
 
 /**
@@ -151,10 +153,10 @@ static int DetectHttpMethodSetup(DetectEngineCtx *de_ctx, Signature *s, const ch
  */
 static int DetectHttpMethodSetupSticky(DetectEngineCtx *de_ctx, Signature *s, const char *str)
 {
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_http_method_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_http_method_buffer_id) < 0)
         return -1;
 
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_HTTP) < 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_HTTP) < 0)
         return -1;
 
     return 0;
@@ -164,39 +166,34 @@ static int DetectHttpMethodSetupSticky(DetectEngineCtx *de_ctx, Signature *s, co
  *  \retval 1 valid
  *  \retval 0 invalid
  */
-static bool DetectHttpMethodValidateCallback(
-        const Signature *s, const char **sigerror, const DetectBufferType *dbt)
+static bool DetectHttpMethodValidateCallback(const Signature *s, const char **sigerror)
 {
-    for (uint32_t x = 0; x < s->init_data->buffer_index; x++) {
-        if (s->init_data->buffers[x].id != (uint32_t)dbt->id)
+    const SigMatch *sm = s->init_data->smlists[g_http_method_buffer_id];
+    for ( ; sm != NULL; sm = sm->next) {
+        if (sm->type != DETECT_CONTENT)
             continue;
-        const SigMatch *sm = s->init_data->buffers[x].head;
-        for (; sm != NULL; sm = sm->next) {
-            if (sm->type != DETECT_CONTENT)
-                continue;
-            const DetectContentData *cd = (const DetectContentData *)sm->ctx;
-            if (cd->content && cd->content_len) {
-                if (cd->content[cd->content_len - 1] == 0x20) {
-                    *sigerror = "http_method pattern with trailing space";
-                    SCLogError("%s", *sigerror);
-                    return false;
-                } else if (cd->content[0] == 0x20) {
-                    *sigerror = "http_method pattern with leading space";
-                    SCLogError("%s", *sigerror);
-                    return false;
-                } else if (cd->content[cd->content_len - 1] == 0x09) {
-                    *sigerror = "http_method pattern with trailing tab";
-                    SCLogError("%s", *sigerror);
-                    return false;
-                } else if (cd->content[0] == 0x09) {
-                    *sigerror = "http_method pattern with leading tab";
-                    SCLogError("%s", *sigerror);
-                    return false;
-                }
+        const DetectContentData *cd = (const DetectContentData *)sm->ctx;
+        if (cd->content && cd->content_len) {
+            if (cd->content[cd->content_len-1] == 0x20) {
+                *sigerror = "http_method pattern with trailing space";
+                SCLogError(SC_ERR_INVALID_SIGNATURE, "%s", *sigerror);
+                return FALSE;
+            } else if (cd->content[0] == 0x20) {
+                *sigerror = "http_method pattern with leading space";
+                SCLogError(SC_ERR_INVALID_SIGNATURE, "%s", *sigerror);
+                return FALSE;
+            } else if (cd->content[cd->content_len-1] == 0x09) {
+                *sigerror = "http_method pattern with trailing tab";
+                SCLogError(SC_ERR_INVALID_SIGNATURE, "%s", *sigerror);
+                return FALSE;
+            } else if (cd->content[0] == 0x09) {
+                *sigerror = "http_method pattern with leading tab";
+                SCLogError(SC_ERR_INVALID_SIGNATURE, "%s", *sigerror);
+                return FALSE;
             }
         }
     }
-    return true;
+    return TRUE;
 }
 
 static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
@@ -207,14 +204,14 @@ static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
     if (buffer->inspect == NULL) {
         htp_tx_t *tx = (htp_tx_t *)txv;
 
-        if (htp_tx_request_method(tx) == NULL)
+        if (tx->request_method == NULL)
             return NULL;
 
-        const uint32_t data_len = (uint32_t)bstr_len(htp_tx_request_method(tx));
-        const uint8_t *data = bstr_ptr(htp_tx_request_method(tx));
+        const uint32_t data_len = bstr_len(tx->request_method);
+        const uint8_t *data = bstr_ptr(tx->request_method);
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, data, data_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, data, data_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;
@@ -229,12 +226,13 @@ static InspectionBuffer *GetData2(DetectEngineThreadCtx *det_ctx,
         uint32_t b_len = 0;
         const uint8_t *b = NULL;
 
-        if (SCHttp2TxGetMethod(txv, &b, &b_len) != 1)
+        if (rs_http2_tx_get_method(txv, &b, &b_len) != 1)
             return NULL;
         if (b == NULL || b_len == 0)
             return NULL;
 
-        InspectionBufferSetupAndApplyTransforms(det_ctx, list_id, buffer, b, b_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, b, b_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;

@@ -21,9 +21,9 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_HTTP_CLIENT_BODY_H
-#define SURICATA_DETECT_HTTP_CLIENT_BODY_H
+#ifndef __DETECT_HTTP_CLIENT_BODY_H__
+#define __DETECT_HTTP_CLIENT_BODY_H__
 
 void DetectHttpClientBodyRegister(void);
 
-#endif /* SURICATA_DETECT_HTTP_CLIENT_BODY_H */
+#endif /* __DETECT_HTTP_CLIENT_BODY_H__ */

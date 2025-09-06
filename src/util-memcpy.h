@@ -24,10 +24,8 @@
  *
  */
 
-#ifndef SURICATA_UTIL_MEMCPY_H
-#define SURICATA_UTIL_MEMCPY_H
-
-#include "suricata-common.h"
+#ifndef __UTIL_MEMCPY_H__
+#define __UTIL_MEMCPY_H__
 
 /**
  * \internal
@@ -46,4 +44,4 @@ static inline void memcpy_tolower(uint8_t *d, const uint8_t *s, uint16_t len)
     return;
 }
 
-#endif /* SURICATA_UTIL_MEMCPY_H */
+#endif /* __UTIL_MEMCPY_H__ */

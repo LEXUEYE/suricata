@@ -21,10 +21,19 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_UTIL_PROFILE_LOCKS_H
-#define SURICATA_UTIL_PROFILE_LOCKS_H
+#ifndef __UTIL_PROFILE_LOCKS_H__
+#define __UTIL_PROFILE_LOCKS_H__
 
 #ifdef PROFILING
+
+#define PROFILING_MAX_LOCKS 64
+
+enum {
+    LOCK_MUTEX,
+    LOCK_SPIN,
+    LOCK_RWW,   /**< rwlock, writer */
+    LOCK_RWR,   /**< rwlock, reader */
+};
 
 void SCProfilingAddPacketLocks(void *);
 
@@ -32,4 +41,5 @@ int LockRecordInitHash(void);
 void LockRecordFreeHash(void);
 
 #endif /* PROFILING */
-#endif /* SURICATA_UTIL_PROFILE_LOCKS_H */
+#endif /* __UTIL_PROFILE_LOCKS_H__ */
+

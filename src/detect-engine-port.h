@@ -21,25 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_ENGINE_PORT_H
-#define SURICATA_DETECT_ENGINE_PORT_H
-
-#include "interval-tree.h"
-#include "detect.h"
-
-typedef struct SCPortIntervalNode {
-    uint16_t port;  /* low port of a port range */
-    uint16_t port2; /* high port of a port range */
-    uint16_t max;   /* max value of the high port in the subtree rooted at this node */
-
-    struct SigGroupHead_ *sh; /* SGHs corresponding to this port */
-
-    IRB_ENTRY(SCPortIntervalNode) irb; /* parent entry of the interval tree */
-} SCPortIntervalNode;
-
-IRB_HEAD(PI, SCPortIntervalNode); /* head of the interval tree */
-IRB_PROTOTYPE(PI, SCPortIntervalNode, irb,
-        SCPortIntervalCompare); /* prototype definition of the interval tree */
+#ifndef __DETECT_PORT_H__
+#define __DETECT_PORT_H__
 
 /* prototypes */
 int DetectPortParse(const DetectEngineCtx *, DetectPort **head, const char *str);
@@ -55,7 +38,6 @@ bool DetectPortListsAreEqual(DetectPort *list1, DetectPort *list2);
 void DetectPortPrint(DetectPort *);
 void DetectPortPrintList(DetectPort *head);
 int DetectPortCmp(DetectPort *, DetectPort *);
-DetectPort *DetectPortInit(void);
 void DetectPortFree(const DetectEngineCtx *de_ctx, DetectPort *);
 
 int DetectPortTestConfVars(void);
@@ -69,4 +51,5 @@ int DetectPortHashInit(DetectEngineCtx *de_ctx);
 void DetectPortTests(void);
 #endif
 
-#endif /* SURICATA_DETECT_ENGINE_PORT_H */
+#endif /* __DETECT_PORT_H__ */
+

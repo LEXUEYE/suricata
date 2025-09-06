@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2013 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -35,9 +35,14 @@
 #include "decode-vlan.h"
 #include "decode-events.h"
 
-#include "util-validate.h"
+#include "flow.h"
+
 #include "util-unittest.h"
 #include "util-debug.h"
+
+#include "pkt-var.h"
+#include "util-profiling.h"
+#include "host.h"
 
 /**
  * \internal
@@ -54,16 +59,12 @@
 int DecodeVLAN(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
         const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
-    uint16_t proto;
+    uint32_t proto;
 
     if (p->vlan_idx == 0)
         StatsIncr(tv, dtv->counter_vlan);
     else if (p->vlan_idx == 1)
         StatsIncr(tv, dtv->counter_vlan_qinq);
-    else if (p->vlan_idx == 2)
-        StatsIncr(tv, dtv->counter_vlan_qinqinq);
 
     if(len < VLAN_HEADER_LEN)    {
         ENGINE_SET_INVALID_EVENT(p, VLAN_HEADER_TOO_SMALL);
@@ -72,12 +73,14 @@ int DecodeVLAN(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
     if (!PacketIncreaseCheckLayers(p)) {
         return TM_ECODE_FAILED;
     }
-    if (p->vlan_idx > VLAN_MAX_LAYER_IDX) {
+    if (p->vlan_idx >= 2) {
         ENGINE_SET_EVENT(p,VLAN_HEADER_TOO_MANY_LAYERS);
         return TM_ECODE_FAILED;
     }
 
     VLANHdr *vlan_hdr = (VLANHdr *)pkt;
+    if(vlan_hdr == NULL)
+        return TM_ECODE_FAILED;
 
     proto = GET_VLAN_PROTO(vlan_hdr);
 
@@ -87,11 +90,22 @@ int DecodeVLAN(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
 
     p->vlan_id[p->vlan_idx++] = (uint16_t)GET_VLAN_ID(vlan_hdr);
 
-    if (!DecodeNetworkLayer(tv, dtv, proto, p, pkt + VLAN_HEADER_LEN, len - VLAN_HEADER_LEN)) {
+    if (DecodeNetworkLayer(tv, dtv, proto, p,
+                pkt + VLAN_HEADER_LEN, len - VLAN_HEADER_LEN) == false) {
         ENGINE_SET_INVALID_EVENT(p, VLAN_UNKNOWN_TYPE);
         return TM_ECODE_FAILED;
     }
     return TM_ECODE_OK;
+}
+
+uint16_t DecodeVLANGetId(const Packet *p, uint8_t layer)
+{
+    if (unlikely(layer > 1))
+        return 0;
+    if (p->vlan_idx > layer) {
+        return p->vlan_id[layer];
+    }
+    return 0;
 }
 
 typedef struct IEEE8021ahHdr_ {
@@ -106,8 +120,6 @@ typedef struct IEEE8021ahHdr_ {
 int DecodeIEEE8021ah(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
         const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
     StatsIncr(tv, dtv->counter_ieee8021ah);
 
     if (len < IEEE8021AH_HEADER_LEN) {
@@ -125,9 +137,6 @@ int DecodeIEEE8021ah(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
 }
 
 #ifdef UNITTESTS
-#include "util-unittest-helper.h"
-#include "packet.h"
-
 /** \todo Must GRE+VLAN and Multi-Vlan packets to
  * create more tests
  */
@@ -240,13 +249,13 @@ static int DecodeVLANtest03 (void)
         goto error;
     }
 
-    PacketRecycle(p);
+    PACKET_RECYCLE(p);
     FlowShutdown();
     SCFree(p);
     return 1;
 
 error:
-    PacketRecycle(p);
+    PACKET_RECYCLE(p);
     FlowShutdown();
     SCFree(p);
     return 0;

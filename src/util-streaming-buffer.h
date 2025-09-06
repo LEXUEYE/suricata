@@ -55,39 +55,26 @@
  * +-----------+-----------+
  */
 
-#ifndef SURICATA_UTIL_STREAMING_BUFFER_H
-#define SURICATA_UTIL_STREAMING_BUFFER_H
+
+#ifndef __UTIL_STREAMING_BUFFER_H__
+#define __UTIL_STREAMING_BUFFER_H__
 
 #include "tree.h"
 
-#define STREAMING_BUFFER_REGION_GAP_DEFAULT 262144
+#define STREAMING_BUFFER_NOFLAGS     0
+#define STREAMING_BUFFER_AUTOSLIDE  (1<<0)
 
 typedef struct StreamingBufferConfig_ {
+    uint32_t flags;
+    uint32_t buf_slide;
     uint32_t buf_size;
-    uint16_t max_regions; /**< max concurrent memory regions. 0 means no limit. */
-    uint32_t region_gap;  /**< max gap size before a new region will be created. */
+    void *(*Malloc)(size_t size);
     void *(*Calloc)(size_t n, size_t size);
     void *(*Realloc)(void *ptr, size_t orig_size, size_t size);
     void (*Free)(void *ptr, size_t size);
 } StreamingBufferConfig;
 
-#define STREAMING_BUFFER_CONFIG_INITIALIZER                                                        \
-    {                                                                                              \
-        2048, 8, STREAMING_BUFFER_REGION_GAP_DEFAULT, NULL, NULL, NULL,                            \
-    }
-
-#define STREAMING_BUFFER_REGION_INIT                                                               \
-    {                                                                                              \
-        NULL, 0, 0, 0ULL, NULL,                                                                    \
-    }
-
-typedef struct StreamingBufferRegion_ {
-    uint8_t *buf;           /**< memory block for reassembly */
-    uint32_t buf_size;      /**< size of memory block */
-    uint32_t buf_offset;    /**< how far we are in buf_size */
-    uint64_t stream_offset; /**< stream offset of this region */
-    struct StreamingBufferRegion_ *next;
-} StreamingBufferRegion;
+#define STREAMING_BUFFER_CONFIG_INITIALIZER { 0, 0, 0, NULL, NULL, NULL, NULL, }
 
 /**
  *  \brief block of continues data
@@ -106,45 +93,42 @@ RB_PROTOTYPE(SBB, StreamingBufferBlock, rb, SBBCompare);
 StreamingBufferBlock *SBB_RB_FIND_INCLUSIVE(struct SBB *head, StreamingBufferBlock *elm);
 
 typedef struct StreamingBuffer_ {
-    StreamingBufferRegion region;
+    const StreamingBufferConfig *cfg;
+    // 表示当前存储的开始流数据在整个流中的偏移
+    uint64_t stream_offset; /**< offset of the start of the memory block */
+
+    // 实际数据
+    uint8_t *buf;           /**< memory block for reassembly */
+    // 数据缓冲区最大长度
+    uint32_t buf_size;      /**< size of memory block */
+    // 数据可以插入的开始位置，从buf开始到buf_offset之前的空间都已经存储数据
+    uint32_t buf_offset;    /**< how far we are in buf_size */
+
+    // 数据流节点红黑树，存储多个分割的节点
     struct SBB sbb_tree;    /**< red black tree of Stream Buffer Blocks */
+    // 第一个数据流节点，如果数据流是连续的，一直没有空隙，则head一直为空
     StreamingBufferBlock *head; /**< head, should always be the same as RB_MIN */
+    // 红黑树中存储的多个数据流节点的实际长度，不包含多个空隙节点中间的空隙长度
     uint32_t sbb_size;          /**< data size covered by sbbs */
-    uint16_t regions;
-    uint16_t max_regions;
 #ifdef DEBUG
     uint32_t buf_size_max;
 #endif
 } StreamingBuffer;
 
-static inline bool StreamingBufferHasData(const StreamingBuffer *sb)
-{
-    return (sb->region.stream_offset || sb->region.buf_offset || sb->region.next != NULL ||
-            !RB_EMPTY(&sb->sbb_tree));
-}
-
-static inline uint64_t StreamingBufferGetConsecutiveDataRightEdge(const StreamingBuffer *sb)
-{
-    return sb->region.stream_offset + sb->region.buf_offset;
-}
-
-static inline uint64_t StreamingBufferGetOffset(const StreamingBuffer *sb)
-{
-    return sb->region.stream_offset;
-}
-
 #ifndef DEBUG
-#define STREAMING_BUFFER_INITIALIZER                                                               \
+#define STREAMING_BUFFER_INITIALIZER(cfg)                                                          \
     {                                                                                              \
-        STREAMING_BUFFER_REGION_INIT,                                                              \
+        (cfg),                                                                                     \
+        0,                                                                                         \
+        NULL,                                                                                      \
+        0,                                                                                         \
+        0,                                                                                         \
         { NULL },                                                                                  \
         NULL,                                                                                      \
         0,                                                                                         \
-        1,                                                                                         \
-        1,                                                                                         \
     };
 #else
-#define STREAMING_BUFFER_INITIALIZER { STREAMING_BUFFER_REGION_INIT, { NULL }, NULL, 0, 1, 1, 0 };
+#define STREAMING_BUFFER_INITIALIZER(cfg) { (cfg), 0, NULL, 0, 0, { NULL }, NULL, 0, 0 };
 #endif
 
 typedef struct StreamingBufferSegment_ {
@@ -153,19 +137,21 @@ typedef struct StreamingBufferSegment_ {
 } __attribute__((__packed__)) StreamingBufferSegment;
 
 StreamingBuffer *StreamingBufferInit(const StreamingBufferConfig *cfg);
-void StreamingBufferClear(StreamingBuffer *sb, const StreamingBufferConfig *cfg);
-void StreamingBufferFree(StreamingBuffer *sb, const StreamingBufferConfig *cfg);
+void StreamingBufferClear(StreamingBuffer *sb);
+void StreamingBufferFree(StreamingBuffer *sb);
 
-void StreamingBufferSlideToOffset(
-        StreamingBuffer *sb, const StreamingBufferConfig *cfg, uint64_t offset);
+void StreamingBufferSlide(StreamingBuffer *sb, uint32_t slide);
+void StreamingBufferSlideToOffset(StreamingBuffer *sb, uint64_t offset);
 
-int StreamingBufferAppend(StreamingBuffer *sb, const StreamingBufferConfig *cfg,
-        StreamingBufferSegment *seg, const uint8_t *data, uint32_t data_len) WARN_UNUSED;
-int StreamingBufferAppendNoTrack(StreamingBuffer *sb, const StreamingBufferConfig *cfg,
+StreamingBufferSegment *StreamingBufferAppendRaw(StreamingBuffer *sb,
         const uint8_t *data, uint32_t data_len) WARN_UNUSED;
-int StreamingBufferInsertAt(StreamingBuffer *sb, const StreamingBufferConfig *cfg,
-        StreamingBufferSegment *seg, const uint8_t *data, uint32_t data_len,
-        uint64_t offset) WARN_UNUSED;
+int StreamingBufferAppend(StreamingBuffer *sb, StreamingBufferSegment *seg,
+        const uint8_t *data, uint32_t data_len) WARN_UNUSED;
+int StreamingBufferAppendNoTrack(StreamingBuffer *sb,
+        const uint8_t *data, uint32_t data_len) WARN_UNUSED;
+int StreamingBufferInsertAt(StreamingBuffer *sb, StreamingBufferSegment *seg,
+                             const uint8_t *data, uint32_t data_len,
+                             uint64_t offset) WARN_UNUSED;
 
 void StreamingBufferSegmentGetData(const StreamingBuffer *sb,
                                    const StreamingBufferSegment *seg,
@@ -199,4 +185,4 @@ int StreamingBufferSegmentIsBeforeWindow(const StreamingBuffer *sb,
 
 void StreamingBufferRegisterTests(void);
 
-#endif /* SURICATA_UTIL_STREAMING_BUFFER_H */
+#endif /* __UTIL_STREAMING_BUFFER_H__ */

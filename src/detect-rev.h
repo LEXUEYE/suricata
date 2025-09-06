@@ -21,10 +21,11 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_REV_H
-#define SURICATA_DETECT_REV_H
+#ifndef __DETECT_REV_H__
+#define __DETECT_REV_H__
 
 /* prototypes */
 void DetectRevRegister (void);
 
-#endif /* SURICATA_DETECT_REV_H */
+#endif /* __DETECT_REV_H__ */
+

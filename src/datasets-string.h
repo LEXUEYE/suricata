@@ -21,29 +21,21 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DATASETS_STRING_H
-#define SURICATA_DATASETS_STRING_H
+#ifndef __DATASETS_STRING_H__
+#define __DATASETS_STRING_H__
 
 #include "datasets-reputation.h"
-#include "datasets-context-json.h"
 
 typedef struct StringType {
     uint32_t len;
-    union {
-        DataRepType rep;
-        DataJsonType json;
-    };
+    DataRepType rep;
     uint8_t *ptr;
 } StringType;
 
 int StringSet(void *dst, void *src);
-int StringJsonSet(void *dst, void *src);
 bool StringCompare(void *a, void *b);
-uint32_t StringHash(uint32_t hash_seed, void *s);
-uint32_t StringGetLength(void *s);
+uint32_t StringHash(void *s);
 void StringFree(void *s);
-void StringJsonFree(void *s);
 int StringAsBase64(const void *s, char *out, size_t out_size);
-uint32_t StringJsonGetLength(void *s);
 
-#endif /* SURICATA_DATASETS_STRING_H */
+#endif /* __DATASETS_STRING_H__ */

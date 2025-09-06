@@ -15,28 +15,19 @@
  * 02110-1301, USA.
  */
 
+use std::mem::transmute;
+
+use crate::applayer::{AppLayerResult, AppLayerTxData};
 use crate::core;
-use crate::applayer::{self, *};
 use crate::dcerpc::dcerpc::{
-    DCERPCTransaction, DCERPC_MAX_TX, DCERPC_TYPE_REQUEST, DCERPC_TYPE_RESPONSE, PFCL1_FRAG, PFCL1_LASTFRAG,
-    get_alstate_progress, ALPROTO_DCERPC, PARSER_NAME,
+    DCERPCTransaction, DCERPC_TYPE_REQUEST, DCERPC_TYPE_RESPONSE, PFCL1_FRAG, PFCL1_LASTFRAG,
 };
-use crate::direction::{Direction, DIR_BOTH};
-use crate::flow::Flow;
-use nom7::Err;
-use suricata_sys::sys::{
-    AppLayerParserState, AppProto, SCAppLayerParserConfParserEnabled,
-    SCAppLayerProtoDetectConfProtoDetectionEnabled, SCAppLayerProtoDetectPMRegisterPatternCSwPP,
-};
-use std;
-use std::ffi::CString;
-use std::collections::VecDeque;
 use crate::dcerpc::parser;
 
 // Constant DCERPC UDP Header length
 pub const DCERPC_UDP_HDR_LEN: i32 = 80;
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct DCERPCHdrUdp {
     pub rpc_vers: u8,
     pub pkt_type: u8,
@@ -59,27 +50,18 @@ pub struct DCERPCHdrUdp {
     pub serial_lo: u8,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct DCERPCUDPState {
-    state_data: AppLayerStateData,
     pub tx_id: u64,
-    pub transactions: VecDeque<DCERPCTransaction>,
-    tx_index_completed: usize,
-}
-
-impl State<DCERPCTransaction> for DCERPCUDPState {
-    fn get_transaction_count(&self) -> usize {
-        self.transactions.len()
-    }
-
-    fn get_transaction_by_index(&self, index: usize) -> Option<&DCERPCTransaction> {
-        self.transactions.get(index)
-    }
+    pub transactions: Vec<DCERPCTransaction>,
 }
 
 impl DCERPCUDPState {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new() -> DCERPCUDPState {
+        return DCERPCUDPState {
+            tx_id: 0,
+            transactions: Vec::new(),
+        };
     }
 
     fn create_tx(&mut self,  hdr: &DCERPCHdrUdp) -> DCERPCTransaction {
@@ -89,20 +71,6 @@ impl DCERPCUDPState {
         tx.activityuuid = hdr.activityuuid.to_vec();
         tx.seqnum = hdr.seqnum;
         self.tx_id += 1;
-        if self.transactions.len() > unsafe { DCERPC_MAX_TX } {
-            let mut index = self.tx_index_completed;
-            for tx_old in &mut self.transactions.range_mut(self.tx_index_completed..) {
-                index += 1;
-                if !tx_old.req_done || !tx_old.resp_done {
-                    tx_old.tx_data.updated_tc = true;
-                    tx_old.tx_data.updated_ts = true;
-                    tx_old.req_done = true;
-                    tx_old.resp_done = true;
-                    break;
-                }
-            }
-            self.tx_index_completed = index;
-        }
         tx
     }
 
@@ -113,7 +81,7 @@ impl DCERPCUDPState {
         let mut index = 0;
         for i in 0..len {
             let tx = &self.transactions[i];
-            if tx.id == tx_id { //+ 1 {
+            if tx.id as u64 == tx_id { //+ 1 {
                 found = true;
                 index = i;
                 SCLogDebug!("tx {} progress {}/{}", tx.id, tx.req_done, tx.resp_done);
@@ -123,7 +91,6 @@ impl DCERPCUDPState {
         if found {
             SCLogDebug!("freeing TX with ID {} TX.ID {} at index {} left: {} max id: {}",
                             tx_id, tx_id+1, index, self.transactions.len(), self.tx_id);
-            self.tx_index_completed = 0;
             self.transactions.remove(index);
         }
     }
@@ -133,7 +100,8 @@ impl DCERPCUDPState {
     /// parser in C. This requires an internal transaction ID to be maintained.
     ///
     /// Arguments:
-    /// * `tx_id`: internal transaction ID to track transactions
+    /// * `tx_id`:
+    ///    description: internal transaction ID to track transactions
     ///
     /// Return value:
     /// Option mutable reference to DCERPCTransaction
@@ -148,12 +116,16 @@ impl DCERPCUDPState {
     }
 
     fn find_incomplete_tx(&mut self, hdr: &DCERPCHdrUdp) -> Option<&mut DCERPCTransaction> {
-        return self.transactions.iter_mut().find(|tx| {
-            tx.seqnum == hdr.seqnum
-                && tx.activityuuid == hdr.activityuuid
-                && ((hdr.pkt_type == DCERPC_TYPE_REQUEST && !tx.req_done)
-                    || (hdr.pkt_type == DCERPC_TYPE_RESPONSE && !tx.resp_done))
-        });
+        for tx in &mut self.transactions {
+            if tx.seqnum == hdr.seqnum && tx.activityuuid == hdr.activityuuid {
+                if (hdr.pkt_type == DCERPC_TYPE_REQUEST && !tx.req_done) ||
+                   (hdr.pkt_type == DCERPC_TYPE_RESPONSE && !tx.resp_done) {
+                    SCLogDebug!("found tx id {}, last tx_id {}, {} {}", tx.id, self.tx_id, tx.seqnum, tx.activityuuid[0]);
+                    return Some(tx);
+                }
+            }
+        }
+        None
     }
 
     pub fn handle_fragment_data(&mut self, hdr: &DCERPCHdrUdp, input: &[u8]) -> bool {
@@ -166,18 +138,16 @@ impl DCERPCUDPState {
         if otx.is_none() {
             let ntx = self.create_tx(hdr);
             SCLogDebug!("new tx id {}, last tx_id {}, {} {}", ntx.id, self.tx_id, ntx.seqnum, ntx.activityuuid[0]);
-            self.transactions.push_back(ntx);
-            otx = self.transactions.back_mut();
+            self.transactions.push(ntx);
+            otx = self.transactions.last_mut();
         }
 
         if let Some(tx) = otx {
-            tx.tx_data.updated_tc = true;
-            tx.tx_data.updated_ts = true;
             let done = (hdr.flags1 & PFCL1_FRAG) == 0 || (hdr.flags1 & PFCL1_LASTFRAG) != 0;
 
             match hdr.pkt_type {
                 DCERPC_TYPE_REQUEST => {
-                    tx.stub_data_buffer_ts.extend_from_slice(input);
+                    tx.stub_data_buffer_ts.extend_from_slice(&input);
                     tx.frag_cnt_ts += 1;
                     if done {
                         tx.req_done = true;
@@ -185,7 +155,7 @@ impl DCERPCUDPState {
                     return true;
                 }
                 DCERPC_TYPE_RESPONSE => {
-                    tx.stub_data_buffer_tc.extend_from_slice(input);
+                    tx.stub_data_buffer_tc.extend_from_slice(&input);
                     tx.frag_cnt_tc += 1;
                     if done {
                         tx.resp_done = true;
@@ -221,7 +191,7 @@ impl DCERPCUDPState {
                     return AppLayerResult::err();
                 }
             }
-            Err(Err::Incomplete(_)) => {
+            Err(nom::Err::Incomplete(_)) => {
                 // Insufficient data.
                 SCLogDebug!("Insufficient data while parsing DCERPC request");
                 return AppLayerResult::err();
@@ -236,37 +206,61 @@ impl DCERPCUDPState {
     }
 }
 
-unsafe extern "C" fn parse(
-    _flow: *mut Flow, state: *mut std::os::raw::c_void, _pstate: *mut AppLayerParserState,
-    stream_slice: StreamSlice,
-    _data: *const std::os::raw::c_void,
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_udp_parse(
+    _flow: *mut core::Flow, state: &mut DCERPCUDPState, _pstate: *mut std::os::raw::c_void,
+    input: *const u8, input_len: u32, _data: *mut std::os::raw::c_void, _flags: u8,
 ) -> AppLayerResult {
-    let state = cast_pointer!(state, DCERPCUDPState);
-    if !stream_slice.is_gap() {
-        return state.handle_input_data(stream_slice.as_slice());
+    if input_len > 0 && input != std::ptr::null_mut() {
+        let buf = build_slice!(input, input_len as usize);
+        return state.handle_input_data(buf);
     }
     AppLayerResult::err()
 }
 
-extern "C" fn state_free(state: *mut std::os::raw::c_void) {
-    std::mem::drop(unsafe { Box::from_raw(state as *mut DCERPCUDPState) });
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_udp_state_free(state: *mut std::os::raw::c_void) {
+    let _drop: Box<DCERPCUDPState> = unsafe { transmute(state) };
 }
 
-extern "C" fn state_new(_orig_state: *mut std::os::raw::c_void, _orig_proto: AppProto) -> *mut std::os::raw::c_void {
+#[no_mangle]
+pub unsafe extern "C" fn rs_dcerpc_udp_state_new(_orig_state: *mut std::os::raw::c_void, _orig_proto: core::AppProto) -> *mut std::os::raw::c_void {
     let state = DCERPCUDPState::new();
     let boxed = Box::new(state);
-    return Box::into_raw(boxed) as *mut _;
+    transmute(boxed)
 }
 
-unsafe extern "C" fn state_transaction_free(
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_udp_state_transaction_free(
     state: *mut std::os::raw::c_void, tx_id: u64,
 ) {
     let dce_state = cast_pointer!(state, DCERPCUDPState);
-    SCLogDebug!("freeing tx {}", tx_id);
+    SCLogDebug!("freeing tx {}", tx_id as u64);
     dce_state.free_tx(tx_id);
 }
 
-unsafe extern "C" fn get_tx_data(
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_udp_get_tx_detect_state(
+    vtx: *mut std::os::raw::c_void,
+) -> *mut core::DetectEngineState {
+    let dce_state = cast_pointer!(vtx, DCERPCTransaction);
+    match dce_state.de_state {
+        Some(ds) => ds,
+        None => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_udp_set_tx_detect_state(
+    vtx: *mut std::os::raw::c_void, de_state: *mut core::DetectEngineState,
+) -> u8 {
+    let dce_state = cast_pointer!(vtx, DCERPCTransaction);
+    dce_state.de_state = Some(de_state);
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_udp_get_tx_data(
     tx: *mut std::os::raw::c_void)
     -> *mut AppLayerTxData
 {
@@ -274,13 +268,14 @@ unsafe extern "C" fn get_tx_data(
     return &mut tx.tx_data;
 }
 
-unsafe extern "C" fn get_tx(
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_udp_get_tx(
     state: *mut std::os::raw::c_void, tx_id: u64,
-) -> *mut std::os::raw::c_void {
+) -> *mut DCERPCTransaction {
     let dce_state = cast_pointer!(state, DCERPCUDPState);
     match dce_state.get_tx(tx_id) {
         Some(tx) => {
-            return tx as *const _ as *mut _;
+            return unsafe{&mut *(tx as *mut DCERPCTransaction)};
         },
         None => {
             return std::ptr::null_mut();
@@ -288,7 +283,8 @@ unsafe extern "C" fn get_tx(
     } 
 }
 
-unsafe extern "C" fn get_tx_cnt(vtx: *mut std::os::raw::c_void) -> u64 {
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_udp_get_tx_cnt(vtx: *mut std::os::raw::c_void) -> u64 {
     let dce_state = cast_pointer!(vtx, DCERPCUDPState);
     dce_state.tx_id
 }
@@ -296,11 +292,9 @@ unsafe extern "C" fn get_tx_cnt(vtx: *mut std::os::raw::c_void) -> u64 {
 /// Probe input to see if it looks like DCERPC.
 fn probe(input: &[u8]) -> (bool, bool) {
     match parser::parse_dcerpc_udp_header(input) {
-        Ok((leftover_bytes, hdr)) => {
+        Ok((_, hdr)) => {
             let is_request = hdr.pkt_type == 0x00;
             let is_dcerpc = hdr.rpc_vers == 0x04 &&
-                hdr.fragnum == 0 &&
-                leftover_bytes.len() >= hdr.fraglen as usize &&
                 (hdr.flags2 & 0xfc == 0) &&
                 (hdr.drep[0] & 0xee == 0) &&
                 (hdr.drep[1] <= 3);
@@ -310,93 +304,32 @@ fn probe(input: &[u8]) -> (bool, bool) {
     }
 }
 
-unsafe extern "C" fn probe_udp(_f: *const Flow, direction: u8, input: *const u8,
-                                      len: u32, rdir: *mut u8) -> AppProto
+#[no_mangle]
+pub extern "C" fn rs_dcerpc_probe_udp(direction: u8, input: *const u8,
+                                      len: u32, rdir: *mut u8) -> i32
 {
     SCLogDebug!("Probing the packet for DCERPC/UDP");
-    if len == 0 || input.is_null() {
+    if len == 0 {
         return core::ALPROTO_UNKNOWN;
     }
-    let slice: &[u8] = std::slice::from_raw_parts(input as *mut u8, len as usize);
+    let slice: &[u8] = unsafe {
+        std::slice::from_raw_parts(input as *mut u8, len as usize)
+    };
     //is_incomplete is checked by caller
     let (is_dcerpc, is_request) = probe(slice);
     if is_dcerpc {
-        let dir: Direction = (direction & DIR_BOTH).into();
-        if is_request {
-            if dir != Direction::ToServer {
-                *rdir = Direction::ToServer.into();
-            }
-        } else if dir != Direction::ToClient {
-            *rdir = Direction::ToClient.into();
+        let dir = if is_request {
+            core::STREAM_TOSERVER
+        } else {
+            core::STREAM_TOCLIENT
         };
-        return ALPROTO_DCERPC;
-    }
-    return core::ALPROTO_FAILED;
-}
-
-fn register_pattern_probe() -> i8 {
-    unsafe {
-        if SCAppLayerProtoDetectPMRegisterPatternCSwPP(core::IPPROTO_UDP, ALPROTO_DCERPC,
-                                                     b"|04 00|\0".as_ptr() as *const std::os::raw::c_char, 2, 0,
-                                                     Direction::ToServer.into(), Some(probe_udp), 0, 0) < 0 {
-            SCLogDebug!("TOSERVER => SCAppLayerProtoDetectPMRegisterPatternCSwPP FAILED");
-            return -1;
+        if direction & (core::STREAM_TOSERVER|core::STREAM_TOCLIENT) != dir {
+            unsafe { *rdir = dir };
         }
+        return 1;
     }
-    0
-}
+    return 0;
 
-export_state_data_get!(get_state_data, DCERPCUDPState);
-
-#[no_mangle]
-pub unsafe extern "C" fn SCRegisterDcerpcUdpParser() {
-    let parser = RustParser {
-        name: PARSER_NAME.as_ptr() as *const std::os::raw::c_char,
-        default_port: std::ptr::null(),
-        ipproto: core::IPPROTO_UDP,
-        probe_ts: None,
-        probe_tc: None,
-        min_depth: 0,
-        max_depth: 16,
-        state_new,
-        state_free,
-        tx_free: state_transaction_free,
-        parse_ts: parse,
-        parse_tc: parse,
-        get_tx_count: get_tx_cnt,
-        get_tx,
-        tx_comp_st_ts: 1,
-        tx_comp_st_tc: 1,
-        tx_get_progress: get_alstate_progress,
-        get_eventinfo: None,
-        get_eventinfo_byid: None,
-        localstorage_new: None,
-        localstorage_free: None,
-        get_tx_files: None,
-        get_tx_iterator: Some(applayer::state_get_tx_iterator::<DCERPCUDPState, DCERPCTransaction>),
-        get_tx_data,
-        get_state_data,
-        apply_tx_config: None,
-        flags: 0,
-        get_frame_id_by_name: None,
-        get_frame_name_by_id: None,
-        get_state_id_by_name: None,
-        get_state_name_by_id: None,
-    };
-
-    let ip_proto_str = CString::new("udp").unwrap();
-    if SCAppLayerProtoDetectConfProtoDetectionEnabled(ip_proto_str.as_ptr(), parser.name) != 0 {
-        let alproto = AppLayerRegisterProtocolDetection(&parser, 1);
-        ALPROTO_DCERPC = alproto;
-        if register_pattern_probe() < 0 {
-            return;
-        }
-        if SCAppLayerParserConfParserEnabled(ip_proto_str.as_ptr(), parser.name) != 0 {
-            let _ = AppLayerRegisterParser(&parser, alproto);
-        }
-    } else {
-        SCLogDebug!("Protocol detecter and parser disabled for DCERPC/UDP.");
-    }
 }
 
 
@@ -414,7 +347,12 @@ mod tests {
             0x1c, 0x7d, 0xcf, 0x11,
         ];
 
-        assert!(parser::parse_dcerpc_udp_header(request).is_err());
+        match parser::parse_dcerpc_udp_header(request) {
+            Ok((_rem, _header)) => {
+                { assert!(false); }
+            }
+            _ => {}
+        }
     }
 
     #[test]
@@ -427,9 +365,13 @@ mod tests {
             0x79, 0xbe, 0x01, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0xff, 0xff, 0xff, 0xff, 0x68, 0x00, 0x00, 0x00, 0x0a, 0x00,
         ];
-        let (rem, header) = parser::parse_dcerpc_udp_header(request).unwrap();
-        assert_eq!(4, header.rpc_vers);
-        assert_eq!(80, request.len() - rem.len());
+        match parser::parse_dcerpc_udp_header(request) {
+            Ok((rem, header)) => {
+                assert_eq!(4, header.rpc_vers);
+                assert_eq!(80, request.len() - rem.len());
+            }
+            _ => { assert!(false); }
+        }
     }
 
     #[test]
@@ -442,10 +384,14 @@ mod tests {
             0x79, 0xbe, 0x01, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0xff, 0xff, 0xff, 0xff, 0x68, 0x00, 0x00, 0x00, 0x0a, 0x00,
         ];
-        let (rem, header) = parser::parse_dcerpc_udp_header(request).unwrap();
-        assert_eq!(4, header.rpc_vers);
-        assert_eq!(80, request.len() - rem.len());
-        assert_eq!(0, rem.len());
+        match parser::parse_dcerpc_udp_header(request) {
+            Ok((rem, header)) => {
+                assert_eq!(4, header.rpc_vers);
+                assert_eq!(80, request.len() - rem.len());
+                assert_eq!(0, rem.len());
+            }
+            _ => { assert!(false); }
+        }
     }
 
     #[test]

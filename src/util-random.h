@@ -21,9 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_UTIL_RANDOM_H
-#define SURICATA_UTIL_RANDOM_H
+#ifndef __UTIL_RANDOM_H__
+#define __UTIL_RANDOM_H__
 
 long int RandomGet(void);
 
-#endif /* SURICATA_UTIL_RANDOM_H */
+#endif /* __UTIL_RANDOM_H__ */
+

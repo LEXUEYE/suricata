@@ -21,10 +21,8 @@
  * \author Eric Leblond <eleblond@stamus-networks.com>
  */
 
-#ifndef SURICATA_FLOW_BYPASS_H
-#define SURICATA_FLOW_BYPASS_H
-
-#include "flow.h"
+#ifndef __FLOW_BYPASS_H__
+#define __FLOW_BYPASS_H__
 
 struct flows_stats {
     uint64_t count;
@@ -38,6 +36,8 @@ typedef int (*BypassedCheckFunc)(ThreadVars *th_v,
 typedef int (*BypassedCheckFuncInit)(ThreadVars *th_v,
                                      struct timespec *curtime, void *data);
 typedef int (*BypassedUpdateFunc)(Flow *f, Packet *p, void *data);
+
+void FlowAddToBypassed(Flow *f);
 
 void BypassedFlowManagerThreadSpawn(void);
 void TmModuleBypassedFlowManagerRegister(void);

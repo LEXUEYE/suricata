@@ -21,10 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_NFS_PROCEDURE_H
-#define SURICATA_DETECT_NFS_PROCEDURE_H
+#ifndef __DETECT_NFS_PROCEDURE_H__
+#define __DETECT_NFS_PROCEDURE_H__
 
 /* prototypes */
 void DetectNfsProcedureRegister (void);
 
-#endif /* SURICATA_DETECT_NFS_PROCEDURE_H */
+#endif /* __DETECT_NFS_PROCEDURE_H__ */

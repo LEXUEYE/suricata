@@ -37,7 +37,6 @@
 #include "detect.h"
 #include "detect-parse.h"
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-state.h"
 #include "detect-engine-prefilter.h"
@@ -68,15 +67,15 @@ static InspectionBuffer *GetSshData(DetectEngineThreadCtx *det_ctx,
         const uint8_t *software = NULL;
         uint32_t b_len = 0;
 
-        if (SCSshTxGetSoftware(txv, &software, &b_len, flow_flags) != 1)
+        if (rs_ssh_tx_get_software(txv, &software, &b_len, flow_flags) != 1)
             return NULL;
         if (software == NULL || b_len == 0) {
             SCLogDebug("SSH software version not set");
             return NULL;
         }
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, software, b_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, software, b_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;
@@ -84,10 +83,10 @@ static InspectionBuffer *GetSshData(DetectEngineThreadCtx *det_ctx,
 
 static int DetectSshSoftwareSetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
 {
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_buffer_id) < 0)
         return -1;
 
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_SSH) < 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_SSH) < 0)
         return -1;
 
     return 0;
@@ -96,22 +95,26 @@ static int DetectSshSoftwareSetup(DetectEngineCtx *de_ctx, Signature *s, const c
 
 void DetectSshSoftwareRegister(void)
 {
-    sigmatch_table[DETECT_SSH_SOFTWARE].name = KEYWORD_NAME;
-    sigmatch_table[DETECT_SSH_SOFTWARE].alias = KEYWORD_NAME_LEGACY;
-    sigmatch_table[DETECT_SSH_SOFTWARE].desc = BUFFER_NAME " sticky buffer";
-    sigmatch_table[DETECT_SSH_SOFTWARE].url = "/rules/" KEYWORD_DOC;
-    sigmatch_table[DETECT_SSH_SOFTWARE].Setup = DetectSshSoftwareSetup;
-    sigmatch_table[DETECT_SSH_SOFTWARE].flags |= SIGMATCH_INFO_STICKY_BUFFER | SIGMATCH_NOOPT;
+    sigmatch_table[DETECT_AL_SSH_SOFTWARE].name = KEYWORD_NAME;
+    sigmatch_table[DETECT_AL_SSH_SOFTWARE].alias = KEYWORD_NAME_LEGACY;
+    sigmatch_table[DETECT_AL_SSH_SOFTWARE].desc = BUFFER_NAME " sticky buffer";
+    sigmatch_table[DETECT_AL_SSH_SOFTWARE].url = "/rules/" KEYWORD_DOC;
+    sigmatch_table[DETECT_AL_SSH_SOFTWARE].Setup = DetectSshSoftwareSetup;
+    sigmatch_table[DETECT_AL_SSH_SOFTWARE].flags |= SIGMATCH_INFO_STICKY_BUFFER | SIGMATCH_NOOPT;
 
-    DetectAppLayerMpmRegister(BUFFER_NAME, SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
-            GetSshData, ALPROTO_SSH, SshStateBannerDone),
-            DetectAppLayerMpmRegister(BUFFER_NAME, SIG_FLAG_TOCLIENT, 2,
-                    PrefilterGenericMpmRegister, GetSshData, ALPROTO_SSH, SshStateBannerDone),
+    DetectAppLayerMpmRegister2(BUFFER_NAME, SIG_FLAG_TOSERVER, 2,
+            PrefilterGenericMpmRegister, GetSshData,
+			ALPROTO_SSH, SshStateBannerDone),
+    DetectAppLayerMpmRegister2(BUFFER_NAME, SIG_FLAG_TOCLIENT, 2,
+            PrefilterGenericMpmRegister, GetSshData,
+			ALPROTO_SSH, SshStateBannerDone),
 
-            DetectAppLayerInspectEngineRegister(BUFFER_NAME, ALPROTO_SSH, SIG_FLAG_TOSERVER,
-                    SshStateBannerDone, DetectEngineInspectBufferGeneric, GetSshData);
-    DetectAppLayerInspectEngineRegister(BUFFER_NAME, ALPROTO_SSH, SIG_FLAG_TOCLIENT,
-            SshStateBannerDone, DetectEngineInspectBufferGeneric, GetSshData);
+    DetectAppLayerInspectEngineRegister2(BUFFER_NAME,
+            ALPROTO_SSH, SIG_FLAG_TOSERVER, SshStateBannerDone,
+            DetectEngineInspectBufferGeneric, GetSshData);
+    DetectAppLayerInspectEngineRegister2(BUFFER_NAME,
+            ALPROTO_SSH, SIG_FLAG_TOCLIENT, SshStateBannerDone,
+            DetectEngineInspectBufferGeneric, GetSshData);
 
     DetectBufferTypeSetDescriptionByName(BUFFER_NAME, BUFFER_DESC);
 

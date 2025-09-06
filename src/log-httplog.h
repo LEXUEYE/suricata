@@ -21,10 +21,13 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_LOG_HTTPLOG_H
-#define SURICATA_LOG_HTTPLOG_H
+#ifndef __LOG_HTTPLOG_H__
+#define __LOG_HTTPLOG_H__
 
 void LogHttpLogRegister(void);
-OutputInitResult LogHttpLogInitCtx(SCConfNode *);
+void TmModuleLogHttpLogIPv4Register (void);
+void TmModuleLogHttpLogIPv6Register (void);
+OutputInitResult LogHttpLogInitCtx(ConfNode *);
 
-#endif /* SURICATA_LOG_HTTPLOG_H */
+#endif /* __LOG_HTTPLOG_H__ */
+

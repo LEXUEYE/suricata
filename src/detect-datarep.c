@@ -32,7 +32,6 @@
 
 #include "detect-parse.h"
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-state.h"
 
@@ -40,7 +39,6 @@
 #include "util-debug.h"
 #include "util-print.h"
 #include "util-misc.h"
-#include "util-path.h"
 
 #define PARSE_REGEX         "([a-z]+)(?:,\\s*([\\-_A-z0-9\\s\\.]+)){1,4}"
 static DetectParseRegex parse_regex;
@@ -160,12 +158,6 @@ static int DetectDatarepParse(const char *str, char *cmd, int cmd_len, char *nam
                     *type = DATASET_TYPE_SHA256;
                 } else if (strcmp(val, "string") == 0) {
                     *type = DATASET_TYPE_STRING;
-                } else if (strcmp(val, "ipv4") == 0) {
-                    *type = DATASET_TYPE_IPV4;
-                } else if (strcmp(val, "ip") == 0) {
-                    *type = DATASET_TYPE_IPV6;
-                } else if (strcmp(val, "ipv6") == 0) {
-                    *type = DATASET_TYPE_IPV6;
                 } else {
                     SCLogDebug("bad type %s", val);
                     return -1;
@@ -177,16 +169,18 @@ static int DetectDatarepParse(const char *str, char *cmd, int cmd_len, char *nam
             }
             if (strcmp(key, "memcap") == 0) {
                 if (ParseSizeStringU64(val, memcap) < 0) {
-                    SCLogWarning("invalid value for memcap: %s,"
-                                 " resetting to default",
+                    SCLogWarning(SC_ERR_INVALID_VALUE,
+                            "invalid value for memcap: %s,"
+                            " resetting to default",
                             val);
                     *memcap = 0;
                 }
             }
             if (strcmp(key, "hashsize") == 0) {
                 if (ParseSizeStringU32(val, hashsize) < 0) {
-                    SCLogWarning("invalid value for hashsize: %s,"
-                                 " resetting to default",
+                    SCLogWarning(SC_ERR_INVALID_VALUE,
+                            "invalid value for hashsize: %s,"
+                            " resetting to default",
                             val);
                     *hashsize = 0;
                 }
@@ -200,12 +194,14 @@ static int DetectDatarepParse(const char *str, char *cmd, int cmd_len, char *nam
     }
 
     if (strlen(load) > 0 && *type == DATASET_TYPE_NOTSET) {
-        SCLogError("if load is used type must be set as well");
+        SCLogError(SC_ERR_INVALID_SIGNATURE,
+                "if load is used type must be set as well");
         return 0;
     }
 
     if (!name_set || !cmd_set || !value_set) {
-        SCLogError("missing values");
+        SCLogError(SC_ERR_INVALID_SIGNATURE,
+                "missing values");
         return 0;
     }
 
@@ -217,7 +213,8 @@ static int DetectDatarepParse(const char *str, char *cmd, int cmd_len, char *nam
     /* Validate name, spaces are not allowed. */
     for (size_t i = 0; i < strlen(name); i++) {
         if (isblank(name[i])) {
-            SCLogError("spaces not allowed in dataset names");
+            SCLogError(SC_ERR_INVALID_SIGNATURE,
+                    "spaces not allowed in dataset names");
             return 0;
         }
     }
@@ -239,6 +236,7 @@ static void GetDirName(const char *in, char *out, size_t outs)
     char *dir = dirname(tmp);
     BUG_ON(dir == NULL);
     strlcpy(out, dir, outs);
+    return;
 }
 
 static int SetupLoadPath(const DetectEngineCtx *de_ctx,
@@ -292,6 +290,7 @@ static int SetupLoadPath(const DetectEngineCtx *de_ctx,
 
 static int DetectDatarepSetup (DetectEngineCtx *de_ctx, Signature *s, const char *rawstr)
 {
+    SigMatch *sm = NULL;
     char cmd_str[16] = "", name[64] = "";
     enum DatasetTypes type = DATASET_TYPE_NOTSET;
     char load[PATH_MAX] = "";
@@ -300,13 +299,15 @@ static int DetectDatarepSetup (DetectEngineCtx *de_ctx, Signature *s, const char
     uint32_t hashsize = 0;
 
     if (DetectBufferGetActiveList(de_ctx, s) == -1) {
-        SCLogError("datarep is only supported for sticky buffers");
+        SCLogError(SC_ERR_INVALID_SIGNATURE,
+                "datarep is only supported for sticky buffers");
         SCReturnInt(-1);
     }
 
     int list = s->init_data->list;
     if (list == DETECT_SM_LIST_NOTSET) {
-        SCLogError("datarep is only supported for sticky buffers");
+        SCLogError(SC_ERR_INVALID_SIGNATURE,
+                "datarep is only supported for sticky buffers");
         SCReturnInt(-1);
     }
 
@@ -328,13 +329,15 @@ static int DetectDatarepSetup (DetectEngineCtx *de_ctx, Signature *s, const char
     } else if (strcmp(cmd_str,"==") == 0) {
         op = DATAREP_OP_EQ;
     } else {
-        SCLogError("datarep operation \"%s\" is not supported.", cmd_str);
+        SCLogError(SC_ERR_UNKNOWN_VALUE,
+                "datarep operation \"%s\" is not supported.", cmd_str);
         return -1;
     }
 
     Dataset *set = DatasetGet(name, type, /* no save */ NULL, load, memcap, hashsize);
     if (set == NULL) {
-        SCLogError("failed to set up datarep set '%s'.", name);
+        SCLogError(SC_ERR_UNKNOWN_VALUE,
+                "failed to set up datarep set '%s'.", name);
         return -1;
     }
 
@@ -351,15 +354,20 @@ static int DetectDatarepSetup (DetectEngineCtx *de_ctx, Signature *s, const char
 
     /* Okay so far so good, lets get this into a SigMatch
      * and put it in the Signature. */
-
-    if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_DATAREP, (SigMatchCtx *)cd, list) == NULL) {
+    sm = SigMatchAlloc();
+    if (sm == NULL)
         goto error;
-    }
+
+    sm->type = DETECT_DATAREP;
+    sm->ctx = (SigMatchCtx *)cd;
+    SigMatchAppendSMToList(s, sm, list);
     return 0;
 
 error:
     if (cd != NULL)
         SCFree(cd);
+    if (sm != NULL)
+        SCFree(sm);
     return -1;
 }
 

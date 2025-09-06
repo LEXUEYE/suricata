@@ -25,11 +25,12 @@
  * This file provides a HTTP protocol support for the engine using HTP library.
  */
 
-#ifndef SURICATA_APP_LAYER_HTP_BODY_H
-#define SURICATA_APP_LAYER_HTP_BODY_H
+#ifndef __APP_LAYER_HTP_BODY_H__
+#define __APP_LAYER_HTP_BODY_H__
 
-int HtpBodyAppendChunk(HtpBody *, const uint8_t *, uint32_t);
+int HtpBodyAppendChunk(const HTPCfgDir *, HtpBody *, const uint8_t *, uint32_t);
+void HtpBodyPrint(HtpBody *);
 void HtpBodyFree(HtpBody *);
 void HtpBodyPrune(HtpState *, HtpBody *, int);
 
-#endif /* SURICATA_APP_LAYER_HTP_BODY_H */
+#endif /* __APP_LAYER_HTP_BODY_H__ */

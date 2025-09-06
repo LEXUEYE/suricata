@@ -23,27 +23,23 @@
  * Flow wrapper around storage api
  */
 
-#ifndef SURICATA_FLOW_STORAGE_H
-#define SURICATA_FLOW_STORAGE_H
+#ifndef __FLOW_STORAGE_H__
+#define __FLOW_STORAGE_H__
 
+#include "util-storage.h"
 #include "flow.h"
-
-typedef struct FlowStorageId {
-    int id;
-} FlowStorageId;
 
 unsigned int FlowStorageSize(void);
 
-void *FlowGetStorageById(const Flow *h, FlowStorageId id);
-int FlowSetStorageById(Flow *h, FlowStorageId id, void *ptr);
-void *FlowAllocStorageById(Flow *h, FlowStorageId id);
+void *FlowGetStorageById(Flow *h, int id);
+int FlowSetStorageById(Flow *h, int id, void *ptr);
+void *FlowAllocStorageById(Flow *h, int id);
 
-void FlowFreeStorageById(Flow *h, FlowStorageId id);
+void FlowFreeStorageById(Flow *h, int id);
 void FlowFreeStorage(Flow *h);
 
 void RegisterFlowStorageTests(void);
 
-FlowStorageId FlowStorageRegister(const char *name, const unsigned int size,
-        void *(*Alloc)(unsigned int), void (*Free)(void *));
+int FlowStorageRegister(const char *name, const unsigned int size, void *(*Alloc)(unsigned int), void (*Free)(void *));
 
-#endif /* SURICATA_FLOW_STORAGE_H */
+#endif /* __FLOW_STORAGE_H__ */

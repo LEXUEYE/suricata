@@ -21,10 +21,8 @@
  * \author Eric Leblond <eric@regit.org>
  */
 
-#ifndef SURICATA_UTIL_CHECKSUM_H
-#define SURICATA_UTIL_CHECKSUM_H
-
-#include "decode.h"
+#ifndef __UTIL_CHECKSUM_H__
+#define __UTIL_CHECKSUM_H__
 
 int ReCalculateChecksum(Packet *p);
 int ChecksumAutoModeCheck(uint64_t thread_count,

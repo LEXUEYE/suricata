@@ -25,6 +25,8 @@
 #define	_DETECT_HTTP_STAT_MSG_H
 
 /* prototypes */
+int DetectHttpStatMsgMatch (ThreadVars *, DetectEngineThreadCtx *, Flow *,
+                            uint8_t , void *, Signature *, SigMatch *);
 void DetectHttpStatMsgRegister(void);
 
 #endif	/* _DETECT_HTTP_STAT_MSG_H */

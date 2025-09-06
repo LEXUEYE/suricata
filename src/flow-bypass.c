@@ -27,7 +27,6 @@
 #include "flow-bypass.h"
 #include "flow-private.h"
 #include "util-ebpf.h"
-#include "runmodes.h"
 
 #ifdef CAPTURE_OFFLOAD_MANAGER
 
@@ -93,10 +92,7 @@ static TmEcode BypassedFlowManager(ThreadVars *th_v, void *thread_data)
     if (!found)
         return TM_ECODE_OK;
 
-    TmThreadsSetFlag(th_v, THV_RUNNING);
-    bool run = TmThreadsWaitForUnpause(th_v);
-
-    while (run) {
+    while (1) {
         SCLogDebug("Dumping the table");
         gettimeofday(&tv, NULL);
         TIMEVAL_TO_TIMESPEC(&tv, &curtime);
@@ -123,7 +119,7 @@ static TmEcode BypassedFlowManager(ThreadVars *th_v, void *thread_data)
                 return TM_ECODE_OK;
             }
             StatsSyncCountersIfSignalled(th_v);
-            SleepMsec(10);
+            usleep(10000);
         }
     }
     return TM_ECODE_OK;
@@ -184,7 +180,7 @@ int BypassedFlowManagerRegisterUpdateFunc(BypassedUpdateFunc UpdateFunc,
 #endif
 
 /** \brief spawn the flow bypass manager thread */
-void BypassedFlowManagerThreadSpawn(void)
+void BypassedFlowManagerThreadSpawn()
 {
 #ifdef CAPTURE_OFFLOAD_MANAGER
 

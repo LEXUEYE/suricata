@@ -21,8 +21,8 @@
  * \author Brian Rectanus <brectanu@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_SEQ_H
-#define SURICATA_DETECT_SEQ_H
+#ifndef __DETECT_SEQ_H__
+#define __DETECT_SEQ_H__
 
 /**
  * \brief seq data
@@ -36,4 +36,4 @@ typedef struct DetectSeqData_ {
  */
 void DetectSeqRegister(void);
 
-#endif /* SURICATA_DETECT_SEQ_H */
+#endif /* __DETECT_SEQ_H__ */

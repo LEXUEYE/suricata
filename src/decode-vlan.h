@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,8 +21,8 @@
  * \author Breno Silva <breno.silva@gmail.com>
  */
 
-#ifndef SURICATA_DECODE_VLAN_H
-#define SURICATA_DECODE_VLAN_H
+#ifndef __DECODE_VLAN_H__
+#define __DECODE_VLAN_H__
 
 /* return vlan id in host byte order */
 uint16_t DecodeVLANGetId(const struct Packet_ *, uint8_t layer);
@@ -36,6 +36,10 @@ uint16_t DecodeVLANGetId(const struct Packet_ *, uint8_t layer);
 #define GET_VLAN_ID(vlanh)          ((uint16_t)(SCNtohs((vlanh)->vlan_cfi) & 0x0FFF))
 #define GET_VLAN_PROTO(vlanh)       ((SCNtohs((vlanh)->protocol)))
 
+/* return vlan id in host byte order */
+#define VLAN_GET_ID1(p)             DecodeVLANGetId((p), 0)
+#define VLAN_GET_ID2(p)             DecodeVLANGetId((p), 1)
+
 /** Vlan header struct */
 typedef struct VLANHdr_ {
     uint16_t vlan_cfi;
@@ -47,8 +51,5 @@ typedef struct VLANHdr_ {
 
 void DecodeVLANRegisterTests(void);
 
-/** VLAN max encapsulation layer count/index */
-#define VLAN_MAX_LAYERS    3
-#define VLAN_MAX_LAYER_IDX (VLAN_MAX_LAYERS - 1)
+#endif /* __DECODE_VLAN_H__ */
 
-#endif /* SURICATA_DECODE_VLAN_H */

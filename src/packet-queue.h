@@ -21,10 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_PACKET_QUEUE_H
-#define SURICATA_PACKET_QUEUE_H
-
-#include "threads.h"
+#ifndef __PACKET_QUEUE_H__
+#define __PACKET_QUEUE_H__
 
 /** \brief simple fifo queue for packets
  *
@@ -57,6 +55,7 @@ typedef struct PacketQueue_ {
     SCCondT cond_q;
 } PacketQueue;
 
+#include "decode.h"
 
 void PacketEnqueueNoLock(PacketQueueNoLock *qnl, struct Packet_ *p);
 void PacketEnqueue (PacketQueue *, struct Packet_ *);
@@ -67,4 +66,5 @@ struct Packet_ *PacketDequeue (PacketQueue *);
 PacketQueue *PacketQueueAlloc(void);
 void PacketQueueFree(PacketQueue *);
 
-#endif /* SURICATA_PACKET_QUEUE_H */
+#endif /* __PACKET_QUEUE_H__ */
+

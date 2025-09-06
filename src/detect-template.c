@@ -96,9 +96,9 @@ static int DetectTemplateMatch (DetectEngineThreadCtx *det_ctx, Packet *p,
         /* fake pkt */
     }
 
-    if (PacketIsIPv4(p)) {
+    if (PKT_IS_IPV4(p)) {
         /* ipv4 pkt */
-    } else if (PacketIsIPv6(p)) {
+    } else if (PKT_IS_IPV6(p)) {
         /* ipv6 pkt */
     } else {
         SCLogDebug("packet is of not IPv4 or IPv6");
@@ -129,50 +129,41 @@ static DetectTemplateData *DetectTemplateParse (const char *templatestr)
 {
     char arg1[4] = "";
     char arg2[4] = "";
+    int ov[MAX_SUBSTRINGS];
 
-    pcre2_match_data *match = NULL;
-    int ret = DetectParsePcreExec(&parse_regex, &match, templatestr, 0, 0);
+    int ret = DetectParsePcreExec(&parse_regex, templatestr, 0, 0, ov, MAX_SUBSTRINGS);
     if (ret != 3) {
-        SCLogError("parse error, ret %" PRId32 "", ret);
-        goto error;
+        SCLogError(SC_ERR_PCRE_MATCH, "parse error, ret %" PRId32 "", ret);
+        return NULL;
     }
 
-    size_t pcre2len = sizeof(arg1);
-    ret = pcre2_substring_copy_bynumber(match, 1, (PCRE2_UCHAR8 *)arg1, &pcre2len);
+    ret = pcre_copy_substring((char *) templatestr, ov, MAX_SUBSTRINGS, 1, arg1, sizeof(arg1));
     if (ret < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
-        goto error;
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
+        return NULL;
     }
     SCLogDebug("Arg1 \"%s\"", arg1);
 
-    pcre2len = sizeof(arg2);
-    ret = pcre2_substring_copy_bynumber(match, 2, (PCRE2_UCHAR8 *)arg2, &pcre2len);
+    ret = pcre_copy_substring((char *) templatestr, ov, MAX_SUBSTRINGS, 2, arg2, sizeof(arg2));
     if (ret < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
-        goto error;
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
+        return NULL;
     }
     SCLogDebug("Arg2 \"%s\"", arg2);
 
     DetectTemplateData *templated = SCMalloc(sizeof (DetectTemplateData));
     if (unlikely(templated == NULL))
-        goto error;
+        return NULL;
 
     if (ByteExtractStringUint8(&templated->arg1, 10, 0, (const char *)arg1) < 0) {
         SCFree(templated);
-        goto error;
+        return NULL;
     }
     if (ByteExtractStringUint8(&templated->arg2, 10, 0, (const char *)arg2) < 0) {
         SCFree(templated);
-        goto error;
+        return NULL;
     }
-    pcre2_match_data_free(match);
     return templated;
-
-error:
-    if (match) {
-        pcre2_match_data_free(match);
-    }
-    return NULL;
 }
 
 /**
@@ -192,11 +183,16 @@ static int DetectTemplateSetup (DetectEngineCtx *de_ctx, Signature *s, const cha
     if (templated == NULL)
         return -1;
 
-    if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_TEMPLATE, (SigMatchCtx *)templated,
-                DETECT_SM_LIST_MATCH) == NULL) {
+    SigMatch *sm = SigMatchAlloc();
+    if (sm == NULL) {
         DetectTemplateFree(de_ctx, templated);
         return -1;
     }
+
+    sm->type = DETECT_TEMPLATE;
+    sm->ctx = (void *)templated;
+
+    SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_MATCH);
     s->flags |= SIG_FLAG_REQUIRE_PACKET;
 
     return 0;

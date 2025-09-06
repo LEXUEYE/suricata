@@ -27,7 +27,6 @@
 #include "suricata-common.h"
 #include "util-host-info.h"
 #include "util-byte.h"
-#include "util-debug.h"
 
 #ifndef OS_WIN32
 #include <sys/utsname.h>
@@ -37,76 +36,69 @@
 int SCKernelVersionIsAtLeast(int major, int minor)
 {
     struct utsname kuname;
-    pcre2_code *version_regex;
-    pcre2_match_data *version_regex_match;
-    int en;
+    pcre *version_regex;
+    pcre_extra *version_regex_study;
+    const char *eb;
     int opts = 0;
-    PCRE2_SIZE eo;
+    int eo;
+#define MAX_SUBSTRINGS 3 * 6
+    int ov[MAX_SUBSTRINGS];
     int ret;
     int kmajor, kminor;
+    const char **list;
 
     /* get local version */
     if (uname(&kuname) != 0) {
-        SCLogError("Invalid uname return: %s", strerror(errno));
+        SCLogError(SC_ERR_INVALID_VALUE, "Invalid uname return: %s",
+                   strerror(errno));
         return 0;
     }
 
     SCLogDebug("Kernel release is '%s'", kuname.release);
 
-    version_regex =
-            pcre2_compile((PCRE2_SPTR8)VERSION_REGEX, PCRE2_ZERO_TERMINATED, opts, &en, &eo, NULL);
+    version_regex = pcre_compile(VERSION_REGEX, opts, &eb, &eo, NULL);
     if (version_regex == NULL) {
-        PCRE2_UCHAR errbuffer[256];
-        pcre2_get_error_message(en, errbuffer, sizeof(errbuffer));
-        SCLogError("pcre2 compile of \"%s\" failed at "
-                   "offset %d: %s",
-                VERSION_REGEX, (int)eo, errbuffer);
+        SCLogError(SC_ERR_PCRE_COMPILE, "pcre compile of \"%s\" failed at offset %" PRId32 ": %s", VERSION_REGEX, eo, eb);
         goto error;
     }
-    version_regex_match = pcre2_match_data_create_from_pattern(version_regex, NULL);
 
-    ret = pcre2_match(version_regex, (PCRE2_SPTR8)kuname.release, strlen(kuname.release), 0, 0,
-            version_regex_match, NULL);
+    version_regex_study = pcre_study(version_regex, 0, &eb);
+    if (eb != NULL) {
+        SCLogError(SC_ERR_PCRE_STUDY, "pcre study failed: %s", eb);
+        goto error;
+    }
+
+    ret = pcre_exec(version_regex, version_regex_study, kuname.release,
+                    strlen(kuname.release), 0, 0, ov, MAX_SUBSTRINGS);
 
     if (ret < 0) {
-        SCLogError("Version did not cut");
+        SCLogError(SC_ERR_PCRE_MATCH, "Version did not cut");
         goto error;
     }
 
     if (ret < 3) {
-        SCLogError("Version major and minor not found (ret %d)", ret);
+        SCLogError(SC_ERR_PCRE_MATCH, "Version major and minor not found (ret %d)", ret);
         goto error;
     }
 
-    char majorstr[32];
-    size_t pcre2len = sizeof(majorstr);
-    ret = pcre2_substring_copy_bynumber(
-            version_regex_match, 1, (PCRE2_UCHAR8 *)majorstr, &pcre2len);
-    if (ret < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
-        goto error;
+    pcre_get_substring_list(kuname.release, ov, ret, &list);
+
+    bool err = false;
+    if (StringParseInt32(&kmajor, 10, 0, (const char *)list[1]) < 0) {
+        SCLogError(SC_ERR_INVALID_VALUE, "Invalid value for kmajor: '%s'", list[1]);
+        err = true;
+    }
+    if (StringParseInt32(&kminor, 10, 0, (const char *)list[2]) < 0) {
+        SCLogError(SC_ERR_INVALID_VALUE, "Invalid value for kminor: '%s'", list[2]);
+        err = true;
     }
 
-    char minorstr[32];
-    pcre2len = sizeof(majorstr);
-    ret = pcre2_substring_copy_bynumber(
-            version_regex_match, 2, (PCRE2_UCHAR8 *)minorstr, &pcre2len);
-    if (ret < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
-        goto error;
-    }
+    pcre_free_substring_list(list);
+    pcre_free_study(version_regex_study);
+    pcre_free(version_regex);
 
-    if (StringParseInt32(&kmajor, 10, 0, (const char *)majorstr) < 0) {
-        SCLogError("Invalid value for kmajor: '%s'", minorstr);
+    if (err)
         goto error;
-    }
-    if (StringParseInt32(&kminor, 10, 0, (const char *)minorstr) < 0) {
-        SCLogError("Invalid value for kminor: '%s'", minorstr);
-        goto error;
-    }
-
-    pcre2_match_data_free(version_regex_match);
-    pcre2_code_free(version_regex);
 
     if (kmajor > major)
         return 1;
@@ -120,7 +112,7 @@ error:
 
 int SCKernelVersionIsAtLeast(int major, int minor)
 {
-    SCLogError("OS compare is not supported on Windows");
+    SCLogError(SC_ERR_NOT_SUPPORTED, "OS compare is not supported on Windows");
     return 0;
 }
 

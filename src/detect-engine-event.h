@@ -21,8 +21,10 @@
  * \author Breno Silva <breno.silva@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_ENGINE_EVENT_H
-#define SURICATA_DETECT_ENGINE_EVENT_H
+#ifndef __DETECT_ENGINE_EVENT_H__
+#define __DETECT_ENGINE_EVENT_H__
+
+#include "decode-events.h"
 
 typedef struct DetectEngineEventData_ {
     uint8_t event;
@@ -31,4 +33,5 @@ typedef struct DetectEngineEventData_ {
 /* prototypes */
 void DetectEngineEventRegister (void);
 
-#endif /*SURICATA_DETECT_ENGINE_EVENT_H */
+#endif /*__DETECT_ENGINE_EVENT_H__ */
+

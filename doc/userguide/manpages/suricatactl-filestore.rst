@@ -60,8 +60,8 @@ NOTES
 
 * Suricata Home Page
 
-    https://suricata.io/
+    https://suricata-ids.org/
 
 * Suricata Support Page
 
-    https://suricata.io/support/
+    https://suricata-ids.org/support/

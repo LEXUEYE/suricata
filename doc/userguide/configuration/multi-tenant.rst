@@ -4,38 +4,37 @@ Multi Tenancy
 Introduction
 ------------
 
-Multi tenancy support allows different tenants to use different
-rule sets with different rule variables.
-
-Tenants are identified by their `selector`; a `selector` can be
-a VLAN, interface/device, or from a pcap file ("direct").
+Multi tenancy support allows for different rule sets with different
+rule vars. These tenants can then be assigned to VLANs or interfaces
+(devices).
 
 YAML
 ----
 
-Add a new section in the main ("master") Suricata configuration file -- ``suricata.yaml`` -- named ``multi-detect``.
+In the main ("master") YAML, the suricata.yaml, a new section called
+"multi-detect" should be added.
 
 Settings:
 
-* `enabled`: yes/no -> is multi-tenancy support enabled
-* `selector`: direct (for unix socket pcap processing, see below), VLAN or device
-* `loaders`: number of `loader` threads, for parallel tenant loading at startup
-* `tenants`: list of tenants
-* `config-path`: path from where the tenant yamls are loaded
+* enabled: yes/no -> is multi-tenancy support enable
+* default: yes/no -> is the normal detect config a default 'fall back' tenant?
+* selector: direct (for unix socket pcap processing, see below), vlan or device
+* loaders: number of 'loader' threads, for parallel tenant loading at startup
+* tenants: list of tenants
 
-  * id: tenant id (numeric values only)
+  * id: tenant id
   * yaml: separate yaml file with the tenant specific settings
 
-* `mappings`:
+* mappings:
 
-  * VLAN id or device: The outermost VLAN is used to match.
-  * tenant id: tenant to associate with the VLAN id or device
+  * vlan id or device
+  * tenant id: tenant to associate with the vlan id / device
 
 ::
 
   multi-detect:
     enabled: yes
-    #selector: direct # direct or vlan or device
+    #selector: direct # direct or vlan
     selector: vlan
     loaders: 3
 
@@ -94,13 +93,12 @@ configuration:
 
       ...
 
-vlan-id
-~~~~~~~
+vlanid
+~~~~~~
 
-Assign tenants to VLAN ids. Suricata matches the outermost VLAN id with this value.
-Multiple VLANs can have the same tenant id. VLAN id values must be between 1 and 4094.
+Assign tenants to vlan id's.
 
-Example of VLAN mapping::
+Example of vlan mapping::
 
     mappings:
     - vlan-id: 1000
@@ -112,13 +110,13 @@ Example of VLAN mapping::
 
 The mappings can also be modified over the unix socket, see below.
 
-Note: can only be used if ``vlan.use-for-tracking`` is enabled.
+Note: can only be used if 'vlan.use-for-tracking' is enabled.
 
 device
 ~~~~~~
 
 Assign tenants to devices. A single tenant can be assigned to a device.
-Multiple devices can have the same tenant id.
+Multiple devices can have the same tenant.
 
 Example of device mapping::
 
@@ -154,7 +152,7 @@ Unix Socket
 Registration
 ~~~~~~~~~~~~
 
-``register-tenant <id> <yaml>``
+register-tenant <id> <yaml>
 
 Examples:
 
@@ -166,7 +164,7 @@ Examples:
   register-tenant 5 tenant-5.yaml
   register-tenant 7 tenant-7.yaml
 
-``unregister-tenant <id>``
+unregister-tenant <id>
 
 ::
 
@@ -176,8 +174,8 @@ Examples:
 Unix socket runmode (pcap processing)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The Unix Socket ``pcap-file``  command is used to associate the tenant with
-the pcap:
+The Unix Socket "pcap-file" command can be used to select the tenant
+to inspect the pcap against:
 
 ::
 
@@ -193,22 +191,22 @@ traffic2.pcap against tenant 2 and logs to /logs2/ and so on.
 Live traffic mode
 ~~~~~~~~~~~~~~~~~
 
-Multi-tenancy supports both VLAN and devices with live traffic.
+For live traffic currently only a vlan based multi-tenancy is supported.
 
-In the master configuration yaml file, specify ``device`` or ``vlan`` for the ``selector`` setting.
+The master yaml needs to have the selector set to "vlan".
 
 Registration
 ~~~~~~~~~~~~
 
-Tenants can be mapped to vlan ids.
+Tenants can be mapped to vlan id's.
 
-``register-tenant-handler <tenant id> vlan <vlan id>``
+register-tenant-handler <tenant id> vlan <vlan id>
 
 ::
 
   register-tenant-handler 1 vlan 1000
 
-``unregister-tenant-handler <tenant id> vlan <vlan id>``
+unregister-tenant-handler <tenant id> vlan <vlan id>
 
 ::
 
@@ -217,33 +215,3 @@ Tenants can be mapped to vlan ids.
 
 The registration of tenant and tenant handlers can be done on a
 running engine.
-
-Reloads
-~~~~~~~
-
-Reloading all tenants:
-
-``reload-tenants``
-
-::
-
-  reload-tenants
-
-Reloading a single tenant:
-
-``reload-tenant <tenant id> [yaml path]``
-
-::
-
-  reload-tenant 1 tenant-1.yaml
-  reload-tenant 5
-
-The ``[yaml path]`` is optional. If it isn't provided, the original path of
-the tenant will be used during the reload.
-
-Eve JSON output
----------------
-
-When multi-tenant support is configured and the detect engine is active then
-all EVE-types that report based on flows will also report the corresponding
-``tenant_id`` for events matching a tenant configuration.

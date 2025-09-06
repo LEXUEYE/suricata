@@ -23,7 +23,7 @@
  * Implements metadata keyword support
  *
  * \todo Do we need to do anything more this is used in snort host attribute table
- *       It is also used for rule management.
+ *       It is also used for rule managment.
  */
 
 #include "suricata-common.h"
@@ -83,10 +83,9 @@ void DetectMetadataHashFree(DetectEngineCtx *de_ctx)
         HashTableFree(de_ctx->metadata_table);
 }
 
-static const char *DetectMetadataHashAdd(DetectEngineCtx *de_ctx, const char *string)
+static const char *DetectMedatataHashAdd(DetectEngineCtx *de_ctx, const char *string)
 {
-    const char *hstring = (char *)HashTableLookup(
-            de_ctx->metadata_table, (void *)string, (uint16_t)strlen(string));
+    const char * hstring = (char *)HashTableLookup(de_ctx->metadata_table, (void *)string, strlen(string));
     if (hstring) {
         return hstring;
     }
@@ -96,9 +95,8 @@ static const char *DetectMetadataHashAdd(DetectEngineCtx *de_ctx, const char *st
         return NULL;
     }
 
-    if (HashTableAdd(de_ctx->metadata_table, (void *)astring, (uint16_t)strlen(astring)) == 0) {
-        return (char *)HashTableLookup(
-                de_ctx->metadata_table, (void *)astring, (uint16_t)strlen(astring));
+    if (HashTableAdd(de_ctx->metadata_table, (void *)astring, strlen(astring)) == 0) {
+        return (char *)HashTableLookup(de_ctx->metadata_table, (void *)astring, strlen(astring));
     } else {
         SCFree((void *)astring);
     }
@@ -129,7 +127,7 @@ static char *CraftPreformattedJSON(const DetectMetadata *head)
     BUG_ON(i != cnt);
     qsort(array, cnt, sizeof(DetectMetadata *), SortHelper);
 
-    SCJsonBuilder *js = SCJbNewObject();
+    JsonBuilder *js = jb_new_object();
     if (js == NULL)
         return NULL;
 
@@ -143,38 +141,38 @@ static char *CraftPreformattedJSON(const DetectMetadata *head)
 
         if (nm && strcasecmp(m->key, nm->key) == 0) {
             if (!array_open) {
-                SCJbOpenArray(js, m->key);
+                jb_open_array(js, m->key);
                 array_open = true;
             }
-            SCJbAppendString(js, m->value);
+            jb_append_string(js, m->value);
         } else {
             if (!array_open) {
-                SCJbOpenArray(js, m->key);
+                jb_open_array(js, m->key);
             }
-            SCJbAppendString(js, m->value);
-            SCJbClose(js);
+            jb_append_string(js, m->value);
+            jb_close(js);
             array_open = false;
         }
     }
-    SCJbClose(js);
+    jb_close(js);
     /* we have a complete json builder. Now store it as a C string */
-    const size_t len = SCJbLen(js);
+    const size_t len = jb_len(js);
 #define MD_STR "\"metadata\":"
 #define MD_STR_LEN (sizeof(MD_STR) - 1)
     char *str = SCMalloc(len + MD_STR_LEN + 1);
     if (str == NULL) {
-        SCJbFree(js);
+        jb_free(js);
         return NULL;
     }
     char *ptr = str;
     memcpy(ptr, MD_STR, MD_STR_LEN);
     ptr += MD_STR_LEN;
-    memcpy(ptr, SCJbPtr(js), len);
+    memcpy(ptr, jb_ptr(js), len);
     ptr += len;
     *ptr = '\0';
 #undef MD_STR
 #undef MD_STR_LEN
-    SCJbFree(js);
+    jb_free(js);
     return str;
 }
 
@@ -205,15 +203,15 @@ static int DetectMetadataParse(DetectEngineCtx *de_ctx, Signature *s, const char
             goto next;
         }
 
-        const char *hkey = DetectMetadataHashAdd(de_ctx, key);
+        const char *hkey = DetectMedatataHashAdd(de_ctx, key);
         if (hkey == NULL) {
-            SCLogError("can't create metadata key");
+            SCLogError(SC_ERR_MEM_ALLOC, "can't create metadata key");
             continue;
         }
 
-        const char *hval = DetectMetadataHashAdd(de_ctx, val);
+        const char *hval = DetectMedatataHashAdd(de_ctx, val);
         if (hval == NULL) {
-            SCLogError("can't create metadata value");
+            SCLogError(SC_ERR_MEM_ALLOC, "can't create metadata value");
             goto next;
         }
 

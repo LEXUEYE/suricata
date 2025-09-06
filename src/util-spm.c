@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2014 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -44,6 +44,7 @@
  */
 
 #include "suricata-common.h"
+#include "suricata.h"
 #include "util-unittest.h"
 
 #include "conf.h"
@@ -57,7 +58,6 @@
 #ifdef BUILD_HYPERSCAN
 #include "hs.h"
 #endif
-#include "util-debug.h"
 
 SpmTableElmt spm_table[SPM_TABLE_SIZE];
 
@@ -65,15 +65,15 @@ SpmTableElmt spm_table[SPM_TABLE_SIZE];
  * \brief Returns the single pattern matcher algorithm to be used, based on the
  * spm-algo setting in yaml.
  */
-uint8_t SinglePatternMatchDefaultMatcher(void)
+uint16_t SinglePatternMatchDefaultMatcher(void)
 {
     const char *spm_algo;
-    if ((SCConfGet("spm-algo", &spm_algo)) == 1) {
+    if ((ConfGet("spm-algo", &spm_algo)) == 1) {
         if (spm_algo != NULL) {
             if (strcmp("auto", spm_algo) == 0) {
                 goto default_matcher;
             }
-            for (uint8_t i = 0; i < SPM_TABLE_SIZE; i++) {
+            for (uint16_t i = 0; i < SPM_TABLE_SIZE; i++) {
                 if (spm_table[i].name == NULL) {
                     continue;
                 }
@@ -85,13 +85,14 @@ uint8_t SinglePatternMatchDefaultMatcher(void)
 
 #ifndef BUILD_HYPERSCAN
         if ((spm_algo != NULL) && (strcmp(spm_algo, "hs") == 0)) {
-            FatalError("Hyperscan (hs) support for spm-algo is "
+            FatalError(SC_ERR_INVALID_VALUE, "Hyperscan (hs) support for spm-algo is "
                        "not compiled into Suricata.");
         }
 #endif
-        SCLogError("Invalid spm algo supplied "
+        SCLogError(SC_ERR_INVALID_YAML_CONF_ENTRY,
+                   "Invalid spm algo supplied "
                    "in the yaml conf file: \"%s\"",
-                spm_algo);
+                   spm_algo);
         exit(EXIT_FAILURE);
     }
 
@@ -135,7 +136,7 @@ void SpmTableSetup(void)
 #endif
 }
 
-SpmGlobalThreadCtx *SpmInitGlobalThreadCtx(uint8_t matcher)
+SpmGlobalThreadCtx *SpmInitGlobalThreadCtx(uint16_t matcher)
 {
     BUG_ON(spm_table[matcher].InitGlobalThreadCtx == NULL);
     return spm_table[matcher].InitGlobalThreadCtx();
@@ -146,7 +147,7 @@ void SpmDestroyGlobalThreadCtx(SpmGlobalThreadCtx *global_thread_ctx)
     if (global_thread_ctx == NULL) {
         return;
     }
-    uint8_t matcher = global_thread_ctx->matcher;
+    uint16_t matcher = global_thread_ctx->matcher;
     spm_table[matcher].DestroyGlobalThreadCtx(global_thread_ctx);
 }
 
@@ -155,7 +156,7 @@ SpmThreadCtx *SpmMakeThreadCtx(const SpmGlobalThreadCtx *global_thread_ctx)
     if (global_thread_ctx == NULL) {
         return NULL;
     }
-    uint8_t matcher = global_thread_ctx->matcher;
+    uint16_t matcher = global_thread_ctx->matcher;
     BUG_ON(spm_table[matcher].MakeThreadCtx == NULL);
     return spm_table[matcher].MakeThreadCtx(global_thread_ctx);
 }
@@ -165,7 +166,7 @@ void SpmDestroyThreadCtx(SpmThreadCtx *thread_ctx)
     if (thread_ctx == NULL) {
         return;
     }
-    uint8_t matcher = thread_ctx->matcher;
+    uint16_t matcher = thread_ctx->matcher;
     BUG_ON(spm_table[matcher].DestroyThreadCtx == NULL);
     spm_table[matcher].DestroyThreadCtx(thread_ctx);
 }
@@ -174,7 +175,7 @@ SpmCtx *SpmInitCtx(const uint8_t *needle, uint16_t needle_len, int nocase,
                    SpmGlobalThreadCtx *global_thread_ctx)
 {
     BUG_ON(global_thread_ctx == NULL);
-    uint8_t matcher = global_thread_ctx->matcher;
+    uint16_t matcher = global_thread_ctx->matcher;
     BUG_ON(spm_table[matcher].InitCtx == NULL);
     return spm_table[matcher].InitCtx(needle, needle_len, nocase,
                                       global_thread_ctx);
@@ -185,7 +186,7 @@ void SpmDestroyCtx(SpmCtx *ctx)
     if (ctx == NULL) {
         return;
     }
-    uint8_t matcher = ctx->matcher;
+    uint16_t matcher = ctx->matcher;
     BUG_ON(spm_table[matcher].DestroyCtx == NULL);
     spm_table[matcher].DestroyCtx(ctx);
 }
@@ -193,7 +194,7 @@ void SpmDestroyCtx(SpmCtx *ctx)
 uint8_t *SpmScan(const SpmCtx *ctx, SpmThreadCtx *thread_ctx,
                  const uint8_t *haystack, uint32_t haystack_len)
 {
-    uint8_t matcher = ctx->matcher;
+    uint16_t matcher = ctx->matcher;
     return spm_table[matcher].Scan(ctx, thread_ctx, haystack, haystack_len);
 }
 
@@ -218,6 +219,23 @@ uint8_t *Bs2bmSearch(const uint8_t *text, uint32_t textlen,
     Bs2BmBadchars(needle, needlelen, badchars);
 
     return Bs2Bm(text, textlen, needle, needlelen, badchars);
+}
+
+/**
+ * \brief Search a pattern in the text using the Bs2Bm nocase algorithm (build a bad characters array)
+ *
+ * \param text Text to search in
+ * \param textlen length of the text
+ * \param needle pattern to search for
+ * \param needlelen length of the pattern
+ */
+uint8_t *Bs2bmNocaseSearch(const uint8_t *text, uint32_t textlen,
+        const uint8_t *needle, uint16_t needlelen)
+{
+    uint8_t badchars[ALPHABET_SIZE];
+    Bs2BmBadchars(needle, needlelen, badchars);
+
+    return Bs2BmNocase(text, textlen, needle, needlelen, badchars);
 }
 
 /**
@@ -267,6 +285,9 @@ uint8_t *BoyerMooreNocaseSearch(const uint8_t *text, uint32_t textlen,
  *  #define ENABLE_SEARCH_STATS 1
  */
 
+/* Number of times to repeat the search (for stats) */
+#define STATS_TIMES 1000000
+
 /**
  * \brief Unittest helper function wrappers for the search algorithms
  * \param text pointer to the buffer to search in
@@ -277,7 +298,7 @@ uint8_t *BoyerMooreNocaseSearch(const uint8_t *text, uint32_t textlen,
 static uint8_t *BasicSearchWrapper(uint8_t *text, uint8_t *needle, int times)
 {
     uint32_t textlen = strlen((char *)text);
-    uint16_t needlelen = (uint16_t)strlen((char *)needle);
+    uint16_t needlelen = strlen((char *)needle);
 
     uint8_t *ret = NULL;
     int i = 0;
@@ -297,7 +318,7 @@ static uint8_t *BasicSearchWrapper(uint8_t *text, uint8_t *needle, int times)
 static uint8_t *BasicSearchNocaseWrapper(uint8_t *text, uint8_t *needle, int times)
 {
     uint32_t textlen = strlen((char *)text);
-    uint16_t needlelen = (uint16_t)strlen((char *)needle);
+    uint16_t needlelen = strlen((char *)needle);
 
     uint8_t *ret = NULL;
     int i = 0;
@@ -314,7 +335,7 @@ static uint8_t *BasicSearchNocaseWrapper(uint8_t *text, uint8_t *needle, int tim
 static uint8_t *Bs2bmWrapper(uint8_t *text, uint8_t *needle, int times)
 {
     uint32_t textlen = strlen((char *)text);
-    uint16_t needlelen = (uint16_t)strlen((char *)needle);
+    uint16_t needlelen = strlen((char *)needle);
 
     uint8_t badchars[ALPHABET_SIZE];
     Bs2BmBadchars(needle, needlelen, badchars);
@@ -334,7 +355,7 @@ static uint8_t *Bs2bmWrapper(uint8_t *text, uint8_t *needle, int times)
 static uint8_t *Bs2bmNocaseWrapper(uint8_t *text, uint8_t *needle, int times)
 {
     uint32_t textlen = strlen((char *)text);
-    uint16_t needlelen = (uint16_t)strlen((char *)needle);
+    uint16_t needlelen = strlen((char *)needle);
 
     uint8_t badchars[ALPHABET_SIZE];
     Bs2BmBadchars(needle, needlelen, badchars);
@@ -354,7 +375,7 @@ static uint8_t *Bs2bmNocaseWrapper(uint8_t *text, uint8_t *needle, int times)
 static uint8_t *BoyerMooreWrapper(uint8_t *text, uint8_t *needle, int times)
 {
     uint32_t textlen = strlen((char *)text);
-    uint16_t needlelen = (uint16_t)strlen((char *)needle);
+    uint16_t needlelen = strlen((char *)needle);
 
     BmCtx *bm_ctx = BoyerMooreCtxInit(needle, needlelen);
 
@@ -374,7 +395,7 @@ static uint8_t *BoyerMooreWrapper(uint8_t *text, uint8_t *needle, int times)
 static uint8_t *BoyerMooreNocaseWrapper(uint8_t *text, uint8_t *in_needle, int times)
 {
     uint32_t textlen = strlen((char *)text);
-    uint16_t needlelen = (uint16_t)strlen((char *)in_needle);
+    uint16_t needlelen = strlen((char *)in_needle);
 
     /* Make a copy of in_needle to be able to convert it to lowercase. */
     uint8_t *needle = SCMalloc(needlelen);
@@ -400,9 +421,6 @@ static uint8_t *BoyerMooreNocaseWrapper(uint8_t *text, uint8_t *in_needle, int t
 }
 
 #ifdef ENABLE_SEARCH_STATS
-/* Number of times to repeat the search (for stats) */
-#define STATS_TIMES 1000000
-
 /**
  * \brief Unittest helper function wrappers for the search algorithms
  * \param text pointer to the buffer to search in
@@ -2461,7 +2479,7 @@ typedef struct SpmTestData_ {
 } SpmTestData;
 
 /* Helper function to conduct a search with a particular SPM matcher. */
-static int SpmTestSearch(const SpmTestData *d, uint8_t matcher)
+static int SpmTestSearch(const SpmTestData *d, uint16_t matcher)
 {
     int ret = 1;
     SpmGlobalThreadCtx *global_thread_ctx = NULL;
@@ -2555,7 +2573,7 @@ static int SpmSearchTest01(void) {
 
     int ret = 1;
 
-    uint8_t matcher;
+    uint16_t matcher;
     for (matcher = 0; matcher < SPM_TABLE_SIZE; matcher++) {
         const SpmTableElmt *m = &spm_table[matcher];
         if (m->name == NULL) {
@@ -2597,7 +2615,7 @@ static int SpmSearchTest02(void) {
 
     int ret = 1;
 
-    uint8_t matcher;
+    uint16_t matcher;
     for (matcher = 0; matcher < SPM_TABLE_SIZE; matcher++) {
         const SpmTableElmt *m = &spm_table[matcher];
         if (m->name == NULL) {
@@ -2613,7 +2631,7 @@ static int SpmSearchTest02(void) {
             uint16_t prefix;
             for (prefix = 0; prefix < 32; prefix++) {
                 d.needle = needle;
-                d.needle_len = (uint16_t)strlen(needle);
+                d.needle_len = strlen(needle);
                 uint16_t haystack_len = prefix + d.needle_len;
                 char *haystack = SCMalloc(haystack_len);
                 if (haystack == NULL) {
@@ -2637,7 +2655,7 @@ static int SpmSearchTest02(void) {
                 d.nocase = 1;
                 uint16_t j;
                 for (j = 0; j < haystack_len; j++) {
-                    haystack[j] = u8_toupper(haystack[j]);
+                    haystack[j] = toupper(haystack[j]);
                 }
                 if (SpmTestSearch(&d, matcher) == 0) {
                     printf("  test %" PRIu32 ": fail (case-insensitive)\n", i);
@@ -2653,9 +2671,12 @@ static int SpmSearchTest02(void) {
     return ret;
 }
 
+#endif
+
 /* Register unittests */
 void UtilSpmSearchRegistertests(void)
 {
+#ifdef UNITTESTS
     /* Generic tests */
     UtRegisterTest("UtilSpmBasicSearchTest01", UtilSpmBasicSearchTest01);
     UtRegisterTest("UtilSpmBasicSearchNocaseTest01",
@@ -2723,5 +2744,5 @@ void UtilSpmSearchRegistertests(void)
                    UtilSpmNocaseSearchStatsTest07);
 
 #endif
-}
 #endif
+}

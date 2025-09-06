@@ -22,11 +22,11 @@
  *
  */
 
-#ifndef SURICATA_RUNMODE_WINDIVERT_H
-#define SURICATA_RUNMODE_WINDIVERT_H
+#ifndef __RUNMODE_WINDIVERT_H__
+#define __RUNMODE_WINDIVERT_H__
 
 int RunModeIpsWinDivertAutoFp(void);
 void RunModeIpsWinDivertRegister(void);
 const char *RunModeIpsWinDivertGetDefaultMode(void);
 
-#endif /* SURICATA_RUNMODE_WINDIVERT_H */
+#endif /* __RUNMODE_WINDIVERT_H__ */

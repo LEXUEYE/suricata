@@ -37,7 +37,6 @@
 #include "detect.h"
 #include "detect-parse.h"
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-state.h"
 #include "detect-engine-prefilter.h"
@@ -80,17 +79,16 @@ static InspectionBuffer *GetData2(DetectEngineThreadCtx *det_ctx,
 void DetectHttpUARegister(void)
 {
     /* http_user_agent content modifier */
-    sigmatch_table[DETECT_HTTP_USER_AGENT].name = "http_user_agent";
-    sigmatch_table[DETECT_HTTP_USER_AGENT].desc =
-            "content modifier to match only on the HTTP User-Agent header";
-    sigmatch_table[DETECT_HTTP_USER_AGENT].url = "/rules/http-keywords.html#http-user-agent";
-    sigmatch_table[DETECT_HTTP_USER_AGENT].Setup = DetectHttpUASetup;
+    sigmatch_table[DETECT_AL_HTTP_USER_AGENT].name = "http_user_agent";
+    sigmatch_table[DETECT_AL_HTTP_USER_AGENT].desc = "content modifier to match only on the HTTP User-Agent header";
+    sigmatch_table[DETECT_AL_HTTP_USER_AGENT].url = "/rules/http-keywords.html#http-user-agent";
+    sigmatch_table[DETECT_AL_HTTP_USER_AGENT].Setup = DetectHttpUASetup;
 #ifdef UNITTESTS
-    sigmatch_table[DETECT_HTTP_USER_AGENT].RegisterTests = DetectHttpUARegisterTests;
+    sigmatch_table[DETECT_AL_HTTP_USER_AGENT].RegisterTests = DetectHttpUARegisterTests;
 #endif
-    sigmatch_table[DETECT_HTTP_USER_AGENT].flags |= SIGMATCH_NOOPT;
-    sigmatch_table[DETECT_HTTP_USER_AGENT].flags |= SIGMATCH_INFO_CONTENT_MODIFIER;
-    sigmatch_table[DETECT_HTTP_USER_AGENT].alternative = DETECT_HTTP_UA;
+    sigmatch_table[DETECT_AL_HTTP_USER_AGENT].flags |= SIGMATCH_NOOPT;
+    sigmatch_table[DETECT_AL_HTTP_USER_AGENT].flags |= SIGMATCH_INFO_CONTENT_MODIFIER;
+    sigmatch_table[DETECT_AL_HTTP_USER_AGENT].alternative = DETECT_HTTP_UA;
 
     /* http.user_agent sticky buffer */
     sigmatch_table[DETECT_HTTP_UA].name = "http.user_agent";
@@ -100,16 +98,18 @@ void DetectHttpUARegister(void)
     sigmatch_table[DETECT_HTTP_UA].flags |= SIGMATCH_NOOPT;
     sigmatch_table[DETECT_HTTP_UA].flags |= SIGMATCH_INFO_STICKY_BUFFER;
 
-    DetectAppLayerInspectEngineRegister("http_user_agent", ALPROTO_HTTP1, SIG_FLAG_TOSERVER,
-            HTP_REQUEST_PROGRESS_HEADERS, DetectEngineInspectBufferGeneric, GetData);
+    DetectAppLayerInspectEngineRegister2("http_user_agent", ALPROTO_HTTP,
+            SIG_FLAG_TOSERVER, HTP_REQUEST_HEADERS,
+            DetectEngineInspectBufferGeneric, GetData);
 
-    DetectAppLayerMpmRegister("http_user_agent", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
-            GetData, ALPROTO_HTTP1, HTP_REQUEST_PROGRESS_HEADERS);
+    DetectAppLayerMpmRegister2("http_user_agent", SIG_FLAG_TOSERVER, 2,
+            PrefilterGenericMpmRegister, GetData, ALPROTO_HTTP,
+            HTP_REQUEST_HEADERS);
 
-    DetectAppLayerInspectEngineRegister("http_user_agent", ALPROTO_HTTP2, SIG_FLAG_TOSERVER,
+    DetectAppLayerInspectEngineRegister2("http_user_agent", ALPROTO_HTTP2, SIG_FLAG_TOSERVER,
             HTTP2StateDataClient, DetectEngineInspectBufferGeneric, GetData2);
 
-    DetectAppLayerMpmRegister("http_user_agent", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
+    DetectAppLayerMpmRegister2("http_user_agent", SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
             GetData2, ALPROTO_HTTP2, HTTP2StateDataClient);
 
     DetectBufferTypeSetDescriptionByName("http_user_agent",
@@ -133,8 +133,10 @@ void DetectHttpUARegister(void)
  */
 int DetectHttpUASetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
 {
-    return DetectEngineContentModifierBufferSetup(
-            de_ctx, s, arg, DETECT_HTTP_USER_AGENT, g_http_ua_buffer_id, ALPROTO_HTTP1);
+    return DetectEngineContentModifierBufferSetup(de_ctx, s, arg,
+                                                  DETECT_AL_HTTP_USER_AGENT,
+                                                  g_http_ua_buffer_id,
+                                                  ALPROTO_HTTP);
 }
 
 /**
@@ -148,9 +150,9 @@ int DetectHttpUASetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
  */
 static int DetectHttpUserAgentSetup(DetectEngineCtx *de_ctx, Signature *s, const char *str)
 {
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_http_ua_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_http_ua_buffer_id) < 0)
         return -1;
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_HTTP) < 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_HTTP) < 0)
         return -1;
     return 0;
 }
@@ -163,20 +165,21 @@ static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
     if (buffer->inspect == NULL) {
         htp_tx_t *tx = (htp_tx_t *)txv;
 
-        if (htp_tx_request_headers(tx) == NULL)
+        if (tx->request_headers == NULL)
             return NULL;
 
-        const htp_header_t *h = htp_tx_request_header(tx, "User-Agent");
-        if (h == NULL || htp_header_value(h) == NULL) {
+        htp_header_t *h = (htp_header_t *)htp_table_get_c(tx->request_headers,
+                "User-Agent");
+        if (h == NULL || h->value == NULL) {
             SCLogDebug("HTTP UA header not present in this request");
             return NULL;
         }
 
-        const uint32_t data_len = (uint32_t)htp_header_value_len(h);
-        const uint8_t *data = htp_header_value_ptr(h);
+        const uint32_t data_len = bstr_len(h->value);
+        const uint8_t *data = bstr_ptr(h->value);
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, data, data_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, data, data_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;
@@ -193,12 +196,13 @@ static InspectionBuffer *GetData2(DetectEngineThreadCtx *det_ctx,
         uint32_t b_len = 0;
         const uint8_t *b = NULL;
 
-        if (SCHttp2TxGetUserAgent(txv, &b, &b_len) != 1)
+        if (rs_http2_tx_get_useragent(txv, &b, &b_len) != 1)
             return NULL;
         if (b == NULL || b_len == 0)
             return NULL;
 
-        InspectionBufferSetupAndApplyTransforms(det_ctx, list_id, buffer, b, b_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, b, b_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     return buffer;

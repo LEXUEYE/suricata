@@ -15,9 +15,13 @@
  * 02110-1301, USA.
  */
 
-#ifndef SURICATA_UTIL_LUA_DNP3_H
-#define SURICATA_UTIL_LUA_DNP3_H
+#ifndef __UTIL_LUA_DNP3_H__
+#define __UTIL_LUA_DNP3_H__
 
-int SCLuaLoadDnp3Lib(lua_State *L);
+#ifdef HAVE_LUA
 
-#endif /* !SURICATA_UTIL_LUA_DNP3_H */
+int LuaRegisterDNP3Functions(lua_State *);
+
+#endif /* HAVE_LUA */
+
+#endif /* !__UTIL_LUA_DNP3_H__ */

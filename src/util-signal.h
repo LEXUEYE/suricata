@@ -21,10 +21,13 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_SIGNAL_H
-#define SURICATA_UTIL_SIGNAL_H
+#ifndef __UTIL_SIGNAL_H__
+#define __UTIL_SIGNAL_H__
 
 int UtilSignalBlock(int);
 int UtilSignalUnblock(int);
 void UtilSignalHandlerSetup(int, void (*handler)(int));
-#endif /* SURICATA_UTIL_SIGNAL_H */
+#if 0
+int UtilSignalIsHandler(int sig, void (*handler)(int));
+#endif
+#endif /* __UTIL_SIGNAL_H__ */

@@ -26,10 +26,8 @@
 
 #include "detect.h"
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-icmpv4hdr.h"
-#include "detect-engine-prefilter.h"
 
 /* prototypes */
 static int DetectIcmpv4HdrSetup(DetectEngineCtx *, Signature *, const char *);
@@ -64,6 +62,8 @@ void DetectIcmpv4HdrRegister(void)
     DetectPktMpmRegister("icmpv4.hdr", 2, PrefilterGenericMpmPktRegister, GetData);
 
     DetectPktInspectEngineRegister("icmpv4.hdr", GetData, DetectEngineInspectPktBufferGeneric);
+
+    return;
 }
 
 /**
@@ -84,7 +84,7 @@ static int DetectIcmpv4HdrSetup(DetectEngineCtx *de_ctx, Signature *s, const cha
     s->proto.flags |= DETECT_PROTO_IPV4;
     s->flags |= SIG_FLAG_REQUIRE_PACKET;
 
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_icmpv4hdr_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_icmpv4hdr_buffer_id) < 0)
         return -1;
 
     return 0;
@@ -95,26 +95,25 @@ static InspectionBuffer *GetData(DetectEngineThreadCtx *det_ctx,
 {
     SCEnter();
 
-    if (!PacketIsICMPv4(p)) {
+    if (p->icmpv4h == NULL) {
         SCReturnPtr(NULL, "InspectionBuffer");
     }
 
     InspectionBuffer *buffer = InspectionBufferGet(det_ctx, list_id);
     if (buffer->inspect == NULL) {
-        const ICMPV4Hdr *icmpv4h = PacketGetICMPv4(p);
         uint16_t hlen = ICMPV4_GET_HLEN_ICMPV4H(p);
-        if (((uint8_t *)icmpv4h + (ptrdiff_t)hlen) >
+        if (((uint8_t *)p->icmpv4h + (ptrdiff_t)hlen) >
                 ((uint8_t *)GET_PKT_DATA(p) + (ptrdiff_t)GET_PKT_LEN(p))) {
-            SCLogDebug("data out of range: %p > %p", ((uint8_t *)icmpv4h + (ptrdiff_t)hlen),
+            SCLogDebug("data out of range: %p > %p", ((uint8_t *)p->icmpv4h + (ptrdiff_t)hlen),
                     ((uint8_t *)GET_PKT_DATA(p) + (ptrdiff_t)GET_PKT_LEN(p)));
             SCReturnPtr(NULL, "InspectionBuffer");
         }
 
         const uint32_t data_len = hlen;
-        const uint8_t *data = (const uint8_t *)icmpv4h;
+        const uint8_t *data = (const uint8_t *)p->icmpv4h;
 
-        InspectionBufferSetupAndApplyTransforms(
-                det_ctx, list_id, buffer, data, data_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, data, data_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
 
     SCReturnPtr(buffer, "InspectionBuffer");

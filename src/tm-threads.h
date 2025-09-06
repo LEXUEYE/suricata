@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2024 Open Information Security Foundation
+/* Copyright (C) 2007-2011 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -22,13 +22,12 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_TM_THREADS_H
-#define SURICATA_TM_THREADS_H
+#ifndef __TM_THREADS_H__
+#define __TM_THREADS_H__
 
 #include "tmqh-packetpool.h"
 #include "tm-threads-common.h"
 #include "tm-modules.h"
-#include "flow.h" // for the FlowQueue
 
 #ifdef OS_WIN32
 static inline void SleepUsec(uint64_t usec)
@@ -63,18 +62,14 @@ typedef struct TmSlot_ {
 
     SC_ATOMIC_DECLARE(void *, slot_data);
 
-    /** copy of the TmModule::flags */
-    uint8_t tm_flags;
-
-    /* store the thread module id */
-    int tm_id;
-
     TmEcode (*SlotThreadInit)(ThreadVars *, const void *, void **);
     void (*SlotThreadExitPrintStats)(ThreadVars *, void *);
     TmEcode (*SlotThreadDeinit)(ThreadVars *, void *);
 
     /* data storage */
     const void *slot_initdata;
+    /* store the thread module id */
+    int tm_id;
 
 } TmSlot;
 
@@ -83,6 +78,7 @@ extern ThreadVars *tv_root[TVT_MAX];
 extern SCMutex tv_root_lock;
 
 void TmSlotSetFuncAppend(ThreadVars *, TmModule *, const void *);
+TmSlot *TmSlotGetSlotForTM(int);
 
 ThreadVars *TmThreadCreate(const char *, const char *, const char *, const char *, const char *, const char *,
                            void *(fn_p)(void *), int);
@@ -94,13 +90,13 @@ ThreadVars *TmThreadCreateMgmtThreadByName(const char *name, const char *module,
 ThreadVars *TmThreadCreateCmdThreadByName(const char *name, const char *module,
                                      int mucond);
 TmEcode TmThreadSpawn(ThreadVars *);
-TmEcode TmThreadLibSpawn(ThreadVars *);
-int TmThreadTimeoutLoop(ThreadVars *tv, TmSlot *s);
+void TmThreadSetFlags(ThreadVars *, uint8_t);
 void TmThreadKillThreadsFamily(int family);
 void TmThreadKillThreads(void);
 void TmThreadClearThreadsFamily(int family);
 void TmThreadAppend(ThreadVars *, int);
 void TmThreadSetGroupName(ThreadVars *tv, const char *name);
+void TmThreadDumpThreads(void);
 
 TmEcode TmThreadSetCPUAffinity(ThreadVars *, uint16_t);
 TmEcode TmThreadSetThreadPriority(ThreadVars *, int);
@@ -110,10 +106,14 @@ void TmThreadSetPrio(ThreadVars *);
 int TmThreadGetNbThreads(uint8_t type);
 
 void TmThreadInitMC(ThreadVars *);
+void TmThreadTestThreadUnPaused(ThreadVars *);
 void TmThreadContinue(ThreadVars *);
 void TmThreadContinueThreads(void);
+void TmThreadPause(ThreadVars *);
+void TmThreadPauseThreads(void);
 void TmThreadCheckThreadState(void);
 TmEcode TmThreadWaitOnThreadInit(void);
+ThreadVars *TmThreadsGetCallingThread(void);
 
 int TmThreadsCheckFlag(ThreadVars *, uint32_t);
 void TmThreadsSetFlag(ThreadVars *, uint32_t);
@@ -122,16 +122,12 @@ void TmThreadWaitForFlag(ThreadVars *, uint32_t);
 
 TmEcode TmThreadsSlotVarRun (ThreadVars *tv, Packet *p, TmSlot *slot);
 
-void TmThreadDisablePacketThreads(
-        const uint16_t set, const uint16_t check, const uint8_t module_flags);
+ThreadVars *TmThreadsGetTVContainingSlot(TmSlot *);
+void TmThreadDisablePacketThreads(void);
 void TmThreadDisableReceiveThreads(void);
+TmSlot *TmThreadGetFirstTmSlotForPartialPattern(const char *);
 
 uint32_t TmThreadCountThreadsByTmmFlags(uint8_t flags);
-
-TmEcode TmThreadWaitOnThreadRunning(void);
-
-TmEcode TmThreadsProcessDecodePseudoPackets(
-        ThreadVars *tv, PacketQueueNoLock *decode_pq, TmSlot *slot);
 
 static inline void TmThreadsCleanDecodePQ(PacketQueueNoLock *pq)
 {
@@ -143,7 +139,7 @@ static inline void TmThreadsCleanDecodePQ(PacketQueueNoLock *pq)
     }
 }
 
-static inline void TmThreadsSlotProcessPktFail(ThreadVars *tv, Packet *p)
+static inline void TmThreadsSlotProcessPktFail(ThreadVars *tv, TmSlot *s, Packet *p)
 {
     if (p != NULL) {
         TmqhOutputPacketpool(tv, p);
@@ -173,12 +169,9 @@ static inline bool TmThreadsHandleInjectedPackets(ThreadVars *tv)
             SCMutexUnlock(&pq->mutex_q);
             if (extra_p == NULL)
                 break;
-#ifdef DEBUG_VALIDATION
-            BUG_ON(extra_p->flow != NULL);
-#endif
             TmEcode r = TmThreadsSlotVarRun(tv, extra_p, tv->tm_flowworker);
             if (r == TM_ECODE_FAILED) {
-                TmThreadsSlotProcessPktFail(tv, extra_p);
+                TmThreadsSlotProcessPktFail(tv, tv->tm_flowworker, extra_p);
                 break;
             }
             tv->tmqh_out(tv, extra_p);
@@ -201,7 +194,7 @@ static inline TmEcode TmThreadsSlotProcessPkt(ThreadVars *tv, TmSlot *s, Packet 
 
     TmEcode r = TmThreadsSlotVarRun(tv, p, s);
     if (unlikely(r == TM_ECODE_FAILED)) {
-        TmThreadsSlotProcessPktFail(tv, p);
+        TmThreadsSlotProcessPktFail(tv, s, p);
         return TM_ECODE_FAILED;
     }
 
@@ -215,7 +208,7 @@ static inline TmEcode TmThreadsSlotProcessPkt(ThreadVars *tv, TmSlot *s, Packet 
 /** \brief inject packet if THV_CAPTURE_INJECT_PKT is set
  *  Allow caller to supply their own packet
  *
- *  Meant for detect reload process that interrupts an sleeping capture thread
+ *  Meant for detect reload process that interupts an sleeping capture thread
  *  to force a packet through the engine to complete a reload */
 static inline void TmThreadsCaptureInjectPacket(ThreadVars *tv, Packet *p)
 {
@@ -246,9 +239,9 @@ static inline void TmThreadsCaptureHandleTimeout(ThreadVars *tv, Packet *p)
         return;
 
     } else {
-        if (!TmThreadsHandleInjectedPackets(tv)) {
+        if (TmThreadsHandleInjectedPackets(tv) == false) {
             /* see if we have to do some house keeping */
-            if (tv->flow_queue && SC_ATOMIC_GET(tv->flow_queue->non_empty)) {
+            if (tv->flow_queue && SC_ATOMIC_GET(tv->flow_queue->non_empty) == true) {
                 TmThreadsCaptureInjectPacket(tv, p); /* consumes 'p' */
                 return;
             }
@@ -261,46 +254,16 @@ static inline void TmThreadsCaptureHandleTimeout(ThreadVars *tv, Packet *p)
         tv->tmqh_out(tv, p);
 }
 
-static inline void TmThreadsCaptureBreakLoop(ThreadVars *tv)
-{
-    if ((tv->tmm_flags & TM_FLAG_RECEIVE_TM) == 0) {
-        return;
-    }
-    /* find the correct slot */
-    TmSlot *s = tv->tm_slots;
-    TmModule *tm = TmModuleGetById(s->tm_id);
-    if (tm->flags & TM_FLAG_RECEIVE_TM) {
-        /* if the method supports it, BreakLoop. Otherwise we rely on
-         * the capture method's recv timeout */
-        if (tm->PktAcqLoop && tm->PktAcqBreakLoop) {
-            tm->PktAcqBreakLoop(tv, SC_ATOMIC_GET(s->slot_data));
-        }
-        TmThreadsSetFlag(tv, THV_CAPTURE_INJECT_PKT);
-    }
-}
-
-void TmThreadsSealThreads(void);
-void TmThreadsUnsealThreads(void);
 void TmThreadsListThreads(void);
 int TmThreadsRegisterThread(ThreadVars *tv, const int type);
 void TmThreadsUnregisterThread(const int id);
+int TmThreadsInjectPacketsById(Packet **, int id);
 void TmThreadsInjectFlowById(Flow *f, const int id);
 
-void TmThreadsInitThreadsTimestamp(const SCTime_t ts);
-void TmThreadsSetThreadTimestamp(const int id, const SCTime_t ts);
+void TmThreadsInitThreadsTimestamp(const struct timeval *ts);
+void TmThreadsSetThreadTimestamp(const int id, const struct timeval *ts);
 void TmThreadsGetMinimalTimestamp(struct timeval *ts);
-SCTime_t TmThreadsGetThreadTime(const int idx);
 uint16_t TmThreadsGetWorkerThreadMax(void);
 bool TmThreadsTimeSubsysIsReady(void);
-bool SCTmThreadsSlotPacketLoopFinish(ThreadVars *tv);
 
-/** \brief Wait for a thread to become unpaused.
- *
- * Check if a thread should wait to be unpaused and wait if so, or
- * until the thread kill flag is set.
- *
- * \returns true if the thread was unpaused, false if killed.
- */
-bool TmThreadsWaitForUnpause(ThreadVars *tv);
-
-#endif /* SURICATA_TM_THREADS_H */
+#endif /* __TM_THREADS_H__ */

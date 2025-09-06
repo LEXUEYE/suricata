@@ -23,23 +23,20 @@
  *  Storage API
  */
 
-#ifndef SURICATA_UTIL_STORAGE_H
-#define SURICATA_UTIL_STORAGE_H
+#ifndef __UTIL_STORAGE_H__
+#define __UTIL_STORAGE_H__
 
 typedef enum StorageEnum_ {
     STORAGE_HOST,
     STORAGE_FLOW,
     STORAGE_IPPAIR,
     STORAGE_DEVICE,
-    STORAGE_THREAD,
 
     STORAGE_MAX,
 } StorageEnum;
 
 /** void ptr array for now */
-typedef struct Storage {
-    void *ptr;
-} Storage;
+typedef void* Storage;
 
 void StorageInit(void);
 void StorageCleanup(void);
@@ -69,7 +66,11 @@ int StorageSetById(Storage *storage, const StorageEnum type, const int id, void 
 /** \brief AllocById func for prealloc'd base storage (storage ptrs are part
  *         of another memory block) */
 void *StorageAllocByIdPrealloc(Storage *storage, StorageEnum type, int id);
+/** \brief AllocById func for when we manage the Storage ptr itself */
+void *StorageAllocById(Storage **storage, const StorageEnum type, const int id);
 void StorageFreeById(Storage *storage, const StorageEnum type, const int id);
 void StorageFreeAll(Storage *storage, const StorageEnum type);
+void StorageFree(Storage **storage, const StorageEnum type);
 
+void StorageRegisterTests(void);
 #endif

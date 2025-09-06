@@ -23,14 +23,13 @@
  * Chained hash table implementation
  *
  * The 'Free' pointer can be used to have the API free your
- * hashed data. If it's NULL it's the callers responsibility
+ * hashed data. If it's NULL it's the callers responsebility
  */
 
 #include "suricata-common.h"
 #include "util-hash.h"
 #include "util-unittest.h"
 #include "util-memcmp.h"
-#include "util-debug.h"
 
 HashTable* HashTableInit(uint32_t size, uint32_t (*Hash)(struct HashTable_ *, void *, uint16_t), char (*Compare)(void *, uint16_t, void *, uint16_t), void (*Free)(void *)) {
 
@@ -46,9 +45,10 @@ HashTable* HashTableInit(uint32_t size, uint32_t (*Hash)(struct HashTable_ *, vo
     }
 
     /* setup the filter */
-    ht = SCCalloc(1, sizeof(HashTable));
+    ht = SCMalloc(sizeof(HashTable));
     if (unlikely(ht == NULL))
-        goto error;
+    goto error;
+    memset(ht,0,sizeof(HashTable));
     ht->array_size = size;
     ht->Hash = Hash;
     ht->Free = Free;
@@ -59,9 +59,10 @@ HashTable* HashTableInit(uint32_t size, uint32_t (*Hash)(struct HashTable_ *, vo
         ht->Compare = HashTableDefaultCompare;
 
     /* setup the bitarray */
-    ht->array = SCCalloc(ht->array_size, sizeof(HashTableBucket *));
+    ht->array = SCMalloc(ht->array_size * sizeof(HashTableBucket *));
     if (ht->array == NULL)
         goto error;
+    memset(ht->array,0,ht->array_size * sizeof(HashTableBucket *));
 
     return ht;
 
@@ -75,46 +76,38 @@ error:
     return NULL;
 }
 
-/**
- *  \brief Free a HashTableBucket and return the next bucket
- *  \param ht Pointer to the HashTable
- *  \param htb Pointer to the HashTableBucket to free
- *  \return HashTableBucket* Pointer to the next HashTableBucket or NULL
- */
-static HashTableBucket *HashTableBucketFree(HashTable *ht, HashTableBucket *htb)
-{
-    HashTableBucket *next_hashbucket = htb->next;
-    if (ht->Free != NULL)
-        ht->Free(htb->data);
-    SCFree(htb);
-    return next_hashbucket;
-}
-
-/**
- *  \brief Free a HashTable and all its contents
- *  \details This function will free all the buckets and the array of buckets.
- *  \note If the Free function is set, it will be called for each data item in the hash table.
- *  \param ht Pointer to the HashTable to free
- *  \return void
- */
 void HashTableFree(HashTable *ht)
 {
+    uint32_t i = 0;
+
     if (ht == NULL)
         return;
 
     /* free the buckets */
-    for (uint32_t i = 0; i < ht->array_size; i++) {
+    for (i = 0; i < ht->array_size; i++) {
         HashTableBucket *hashbucket = ht->array[i];
         while (hashbucket != NULL) {
-            hashbucket = HashTableBucketFree(ht, hashbucket);
+            HashTableBucket *next_hashbucket = hashbucket->next;
+            if (ht->Free != NULL)
+                ht->Free(hashbucket->data);
+            SCFree(hashbucket);
+            hashbucket = next_hashbucket;
         }
     }
 
-    /* free the array */
+    /* free the arrray */
     if (ht->array != NULL)
         SCFree(ht->array);
 
     SCFree(ht);
+}
+
+void HashTablePrint(HashTable *ht)
+{
+    printf("\n----------- Hash Table Stats ------------\n");
+    printf("Buckets:               %" PRIu32 "\n", ht->array_size);
+    printf("Hash function pointer: %p\n", ht->Hash);
+    printf("-----------------------------------------\n");
 }
 
 int HashTableAdd(HashTable *ht, void *data, uint16_t datalen)
@@ -124,15 +117,16 @@ int HashTableAdd(HashTable *ht, void *data, uint16_t datalen)
 
     uint32_t hash = ht->Hash(ht, data, datalen);
 
-    HashTableBucket *hb = SCCalloc(1, sizeof(HashTableBucket));
+    HashTableBucket *hb = SCMalloc(sizeof(HashTableBucket));
     if (unlikely(hb == NULL))
         goto error;
+    memset(hb, 0, sizeof(HashTableBucket));
     hb->data = data;
     hb->size = datalen;
     hb->next = NULL;
 
     if (hash >= ht->array_size) {
-        SCLogWarning("attempt to insert element out of hash array\n");
+        SCLogWarning(SC_ERR_INVALID_VALUE, "attempt to insert element out of hash array\n");
         goto error;
     }
 
@@ -154,27 +148,44 @@ error:
         SCFree(hb);
     return -1;
 }
-/**
- *  \brief Remove an item from the hash table
- *  \details This function will search for the item in the hash table and remove it if found
- *  \note If the Free function is set, it will be called for the data item being removed.
- *  \param ht Pointer to the HashTable
- *  \param data Pointer to the data to remove
- *  \param datalen Length of the data to remove
- *  \return int 0 on success, -1 if the item was not found or an error occurred
- */
+
 int HashTableRemove(HashTable *ht, void *data, uint16_t datalen)
 {
     uint32_t hash = ht->Hash(ht, data, datalen);
 
-    HashTableBucket **hashbucket = &(ht->array[hash]);
-    while (*hashbucket != NULL) {
-        if (ht->Compare((*hashbucket)->data, (*hashbucket)->size, data, datalen)) {
-            *hashbucket = HashTableBucketFree(ht, *hashbucket);
+    if (ht->array[hash] == NULL) {
+        return -1;
+    }
+
+    if (ht->array[hash]->next == NULL) {
+        if (ht->Free != NULL)
+            ht->Free(ht->array[hash]->data);
+        SCFree(ht->array[hash]);
+        ht->array[hash] = NULL;
+        return 0;
+    }
+
+    HashTableBucket *hashbucket = ht->array[hash], *prev_hashbucket = NULL;
+    do {
+        if (ht->Compare(hashbucket->data,hashbucket->size,data,datalen) == 1) {
+            if (prev_hashbucket == NULL) {
+                /* root bucket */
+                ht->array[hash] = hashbucket->next;
+            } else {
+                /* child bucket */
+                prev_hashbucket->next = hashbucket->next;
+            }
+
+            /* remove this */
+            if (ht->Free != NULL)
+                ht->Free(hashbucket->data);
+            SCFree(hashbucket);
             return 0;
         }
-        hashbucket = &((*hashbucket)->next);
-    }
+
+        prev_hashbucket = hashbucket;
+        hashbucket = hashbucket->next;
+    } while (hashbucket != NULL);
 
     return -1;
 }
@@ -189,7 +200,7 @@ void *HashTableLookup(HashTable *ht, void *data, uint16_t datalen)
     hash = ht->Hash(ht, data, datalen);
 
     if (hash >= ht->array_size) {
-        SCLogWarning("attempt to access element out of hash array\n");
+        SCLogWarning(SC_ERR_INVALID_VALUE, "attempt to access element out of hash array\n");
         return NULL;
     }
 
@@ -205,21 +216,6 @@ void *HashTableLookup(HashTable *ht, void *data, uint16_t datalen)
     } while (hashbucket != NULL);
 
     return NULL;
-}
-
-// CallbackFn is an iterator, first argument is the data, second is user auxilary data
-void HashTableIterate(HashTable *ht, void (*CallbackFn)(void *, void *), void *aux)
-{
-    if (ht == NULL || CallbackFn == NULL)
-        return;
-
-    for (uint32_t i = 0; i < ht->array_size; i++) {
-        HashTableBucket *hashbucket = ht->array[i];
-        while (hashbucket != NULL) {
-            CallbackFn(hashbucket->data, aux);
-            hashbucket = hashbucket->next;
-        }
-    }
 }
 
 uint32_t HashTableGenericHash(HashTable *ht, void *data, uint16_t datalen)
@@ -426,39 +422,6 @@ end:
     if (ht != NULL) HashTableFree(ht);
     return result;
 }
-
-static int HashTableTestCollisionBug(void)
-{
-    HashTable *ht = HashTableInit(32, HashTableGenericHash, NULL, NULL);
-    FAIL_IF_NULL(ht);
-
-    FAIL_IF_NOT(HashTableGenericHash(ht, (void *)"abc", 3) ==
-                HashTableGenericHash(ht, (void *)"iln", 3));
-
-    // Add two strings that collide in the same bucket
-    FAIL_IF_NOT(HashTableAdd(ht, (char *)"abc", 3) == 0);
-    FAIL_IF_NOT(HashTableAdd(ht, (char *)"iln", 3) == 0);
-
-    // Verify both keys are present
-    FAIL_IF_NULL(HashTableLookup(ht, (char *)"abc", 3));
-    FAIL_IF_NULL(HashTableLookup(ht, (char *)"iln", 3));
-
-    // Remove first key once
-    FAIL_IF_NOT(HashTableRemove(ht, (char *)"abc", 3) == 0);
-
-    // Verify first key is gone, second key remains
-    FAIL_IF_NOT_NULL(HashTableLookup(ht, (char *)"abc", 3));
-    FAIL_IF_NULL(HashTableLookup(ht, (char *)"iln", 3));
-
-    // Remove first key again (should not affect "iln")
-    FAIL_IF(HashTableRemove(ht, (char *)"abc", 3) == 0);
-
-    // Verify second key is still present (correct behavior)
-    FAIL_IF_NULL(HashTableLookup(ht, (char *)"iln", 3));
-
-    HashTableFree(ht);
-    PASS;
-}
 #endif
 
 void HashTableRegisterTests(void)
@@ -476,6 +439,6 @@ void HashTableRegisterTests(void)
 
     UtRegisterTest("HashTableTestFull01", HashTableTestFull01);
     UtRegisterTest("HashTableTestFull02", HashTableTestFull02);
-    UtRegisterTest("HashTableTestCollisionBug", HashTableTestCollisionBug);
 #endif
 }
+

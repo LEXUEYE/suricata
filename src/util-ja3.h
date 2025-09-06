@@ -21,17 +21,15 @@
  * \author Mats Klepsland <mats.klepsland@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_JA3_H
-#define SURICATA_UTIL_JA3_H
+#ifndef __UTIL_JA3_H__
+#define __UTIL_JA3_H__
 
 #define JA3_BUFFER_INITIAL_SIZE 128
 
-#include "detect.h"
-
 typedef struct JA3Buffer_ {
     char *data;
-    uint32_t size;
-    uint32_t used;
+    size_t size;
+    size_t used;
 } JA3Buffer;
 
 JA3Buffer *Ja3BufferInit(void);
@@ -41,13 +39,5 @@ int Ja3BufferAddValue(JA3Buffer **, uint32_t);
 char *Ja3GenerateHash(JA3Buffer *);
 int Ja3IsDisabled(const char *);
 
-#ifdef HAVE_JA3
-InspectionBuffer *Ja3DetectGetHash(DetectEngineThreadCtx *det_ctx,
-        const DetectEngineTransforms *transforms, Flow *_f, const uint8_t _flow_flags, void *txv,
-        const int list_id);
+#endif /* __UTIL_JA3_H__ */
 
-InspectionBuffer *Ja3DetectGetString(DetectEngineThreadCtx *det_ctx,
-        const DetectEngineTransforms *transforms, Flow *_f, const uint8_t _flow_flags, void *txv,
-        const int list_id);
-#endif /* HAVE_JA3 */
-#endif /* SURICATA_UTIL_JA3_H */

@@ -20,13 +20,14 @@
  *
  * \author Gurvinder Singh <gurvindersinghdahiya@gmail.com>
  *
- * alert syslog module header file
+ * alert syslog modeule header file
  *
  */
 
-#ifndef SURICATA_ALERT_SYSLOG_H
-#define SURICATA_ALERT_SYSLOG_H
+#ifndef __ALERT_SYSLOG_H__
+#define __ALERT_SYSLOG_H__
 
 void AlertSyslogRegister(void);
 
-#endif /* SURICATA_ALERT_SYSLOG_H */
+#endif /* __ALERT_SYSLOG_H__ */
+

@@ -21,10 +21,10 @@
  * \author Mats Klepsland <mats.klepsland@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_TLS_CERT_SERIAL_H
-#define SURICATA_DETECT_TLS_CERT_SERIAL_H
+#ifndef __DETECT_TLS_CERT_SERIAL_H__
+#define __DETECT_TLS_CERT_SERIAL_H__
 
 /* prototypes */
 void DetectTlsSerialRegister (void);
 
-#endif /* SURICATA_DETECT_TLS_CERT_SERIAL_H */
+#endif /* __DETECT_TLS_CERT_SERIAL_H__ */

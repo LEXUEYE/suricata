@@ -1,8 +1,6 @@
 Suricata User Guide
 ===================
 
-This is the documentation for Suricata |version|.
-
 .. toctree::
    :numbered:
    :maxdepth: 2
@@ -11,8 +9,6 @@ This is the documentation for Suricata |version|.
    quickstart
    install.rst
    upgrade.rst
-   security.rst
-   support-status.rst
    command-line-options
    rules/index.rst
    rule-management/index.rst
@@ -29,12 +25,7 @@ This is the documentation for Suricata |version|.
    public-data-sets
    capture-hardware/index.rst
    unix-socket.rst
-   plugins/index.rst
-   firewall/index.rst
    3rd-party-integration/index.rst
    manpages/index.rst
    acknowledgements
    licenses/index.rst
-   devguide/index.rst
-   verifying-source-files
-   appendix/index.rst

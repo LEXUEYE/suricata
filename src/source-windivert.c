@@ -28,10 +28,10 @@
 #include "suricata-common.h"
 #include "suricata.h"
 #include "tm-threads.h"
-#include "packet.h"
+
 #include "util-byte.h"
 #include "util-debug.h"
-#include "util-device-private.h"
+#include "util-device.h"
 #include "util-error.h"
 #include "util-ioctl.h"
 #include "util-privs.h"
@@ -69,7 +69,6 @@ void TmModuleVerdictWinDivertRegister(void)
 {
     tmm_modules[TMM_VERDICTWINDIVERT].name = "VerdictWinDivert";
     tmm_modules[TMM_VERDICTWINDIVERT].ThreadInit = NoWinDivertSupportExit;
-    tmm_modules[TMM_VERDICTWINDIVERT].flags = TM_FLAG_VERDICT_TM;
 }
 
 void TmModuleDecodeWinDivertRegister(void)
@@ -82,20 +81,21 @@ void TmModuleDecodeWinDivertRegister(void)
 TmEcode NoWinDivertSupportExit(ThreadVars *tv, const void *initdata,
                                void **data)
 {
-    SCLogError("Error creating thread %s: you do not have support for WinDivert "
-               "enabled; please recompile with --enable-windivert",
+    SCLogError(
+            SC_ERR_WINDIVERT_NOSUPPORT,
+            "Error creating thread %s: you do not have support for WinDivert "
+            "enabled; please recompile with --enable-windivert",
             tv->name);
     exit(EXIT_FAILURE);
 }
 
 #else /* implied we do have WinDivert support */
-#include "action-globals.h"
-#include "win32-syscall.h"
 
 typedef struct WinDivertThreadVars_ {
     WinDivertHandle filter_handle;
 
     int thread_num;
+    CaptureStats stats;
     int64_t qpc_start_time;
     int64_t qpc_start_count;
     int64_t qpc_freq_usec;
@@ -130,12 +130,8 @@ void *WinDivertGetQueue(int n)
 }
 
 // not defined in MinGW winerror.h
-#ifndef ERROR_INVALID_IMAGE_HASH
 #define ERROR_INVALID_IMAGE_HASH 577L
-#endif
-#ifndef ERROR_DATA_NOT_ACCEPTED
 #define ERROR_DATA_NOT_ACCEPTED 592L
-#endif
 
 /**
  * \brief return an error description for Win32 error values commonly returned
@@ -200,13 +196,15 @@ static const char *WinDivertGetErrorString(DWORD error_code)
 /**
  * \brief logs a WinDivert error at Error level.
  */
-#define WinDivertLogError(err_code)                                                                \
-    do {                                                                                           \
-        const char *win_err_str = Win32GetErrorString((err_code), NULL);                           \
-        SCLogError("WinDivertOpen failed, error %" PRId32 " (0x%08" PRIx32 "): %s %s",             \
-                (uint32_t)(err_code), (uint32_t)(err_code), win_err_str,                           \
-                WinDivertGetErrorString(err_code));                                                \
-        LocalFree((LPVOID)win_err_str);                                                            \
+#define WinDivertLogError(err_code)                                            \
+    do {                                                                       \
+        const char *win_err_str = Win32GetErrorString((err_code), NULL);       \
+        SCLogError(SC_ERR_WINDIVERT_GENERIC,                                   \
+                   "WinDivertOpen failed, error %" PRId32 " (0x%08" PRIx32     \
+                   "): %s %s",                                                 \
+                   (uint32_t)(err_code), (uint32_t)(err_code), win_err_str,    \
+                   WinDivertGetErrorString(err_code));                         \
+        LocalFree((LPVOID)win_err_str);                                        \
     } while (0);
 
 /**
@@ -215,10 +213,13 @@ static const char *WinDivertGetErrorString(DWORD error_code)
  */
 static void WinDivertInitQPCValues(WinDivertThreadVars *wd_tv)
 {
-    SCTime_t now = TimeGet();
+    struct timeval now;
+
+    TimeGet(&now);
     (void)QueryPerformanceCounter((LARGE_INTEGER *)&wd_tv->qpc_start_count);
 
-    wd_tv->qpc_start_time = (uint64_t)SCTIME_SECS(now) * (1000 * 1000) + (uint64_t)SCTIME_SECS(now);
+    wd_tv->qpc_start_time =
+            (uint64_t)now.tv_sec * (1000 * 1000) + (uint64_t)now.tv_usec;
 
     (void)QueryPerformanceFrequency((LARGE_INTEGER *)&wd_tv->qpc_freq_usec);
     /* \bug: clock drift? */
@@ -226,22 +227,21 @@ static void WinDivertInitQPCValues(WinDivertThreadVars *wd_tv)
 }
 
 /**
- * \brief WinDivert timestamp to a SCTime_t
+ * \brief gets a timeval from a WinDivert timestamp
  */
-static SCTime_t WinDivertTimestampToTimeStamp(WinDivertThreadVars *wd_tv, INT64 timestamp_count)
+static struct timeval WinDivertTimestampToTimeval(WinDivertThreadVars *wd_tv,
+                                                  INT64 timestamp_count)
 {
-    struct timeval tv;
+    struct timeval ts;
 
     int64_t qpc_delta = (int64_t)timestamp_count - wd_tv->qpc_start_count;
-    int64_t unix_usec = wd_tv->qpc_start_time;
-    if (wd_tv->qpc_freq_usec) {
-        unix_usec += qpc_delta / wd_tv->qpc_freq_usec;
-    }
+    int64_t unix_usec =
+            wd_tv->qpc_start_time + (qpc_delta / wd_tv->qpc_freq_usec);
 
-    tv.tv_sec = (long)(unix_usec / (1000 * 1000));
-    tv.tv_usec = (long)(unix_usec - (int64_t)tv.tv_sec * (1000 * 1000));
+    ts.tv_sec = (long)(unix_usec / (1000 * 1000));
+    ts.tv_usec = (long)(unix_usec - (int64_t)ts.tv_sec * (1000 * 1000));
 
-    return SCTIME_FROM_TIMEVAL(&tv);
+    return ts;
 }
 
 /**
@@ -267,17 +267,20 @@ int WinDivertRegisterQueue(bool forward, char *filter_str)
     bool valid = WinDivertHelperCheckFilter(filter_str, layer, &error_str,
                                             &error_pos);
     if (!valid) {
-        SCLogWarning("Invalid filter \"%s\" supplied to WinDivert: %s at position "
-                     "%" PRId32 "",
+        SCLogWarning(
+                SC_ERR_WINDIVERT_INVALID_FILTER,
+                "Invalid filter \"%s\" supplied to WinDivert: %s at position "
+                "%" PRId32 "",
                 filter_str, error_str, error_pos);
-        SCReturnInt(-1);
+        SCReturnInt(SC_ERR_WINDIVERT_INVALID_FILTER);
     }
 
     /* initialize the queue */
     SCMutexLock(&g_wd_init_lock);
 
     if (g_wd_num >= WINDIVERT_MAX_QUEUE) {
-        SCLogError("Too many WinDivert queues specified %" PRId32 "", g_wd_num);
+        SCLogError(SC_ERR_INVALID_ARGUMENT,
+                   "Too many WinDivert queues specified %" PRId32 "", g_wd_num);
         ret = -1;
         goto unlock;
     }
@@ -302,8 +305,9 @@ int WinDivertRegisterQueue(bool forward, char *filter_str)
     size_t copy_len =
             strlcpy(wd_qv->filter_str, filter_str, sizeof(wd_qv->filter_str));
     if (filter_len > copy_len) {
-        SCLogWarning("Queue length exceeds storage by %" PRId32 " bytes",
-                (int32_t)(filter_len - copy_len));
+        SCLogWarning(SC_ERR_WINDIVERT_TOOLONG_FILTER,
+                     "Queue length exceeds storage by %" PRId32 " bytes",
+                     (int32_t)(filter_len - copy_len));
         ret = -1;
         goto unlock;
     }
@@ -383,7 +387,6 @@ void TmModuleVerdictWinDivertRegister(void)
     tm_ptr->ThreadInit = VerdictWinDivertThreadInit;
     tm_ptr->Func = VerdictWinDivert;
     tm_ptr->ThreadDeinit = VerdictWinDivertThreadDeinit;
-    tm_ptr->flags = TM_FLAG_VERDICT_TM;
 }
 
 void TmModuleDecodeWinDivertRegister(void)
@@ -406,10 +409,6 @@ TmEcode ReceiveWinDivertLoop(ThreadVars *tv, void *data, void *slot)
 
     WinDivertThreadVars *wd_tv = (WinDivertThreadVars *)data;
     wd_tv->slot = ((TmSlot *)slot)->slot_next;
-
-    // Indicate that the thread is actually running its application level code (i.e., it can poll
-    // packets)
-    TmThreadsSetFlag(tv, THV_RUNNING);
 
     while (true) {
         if (suricata_ctl_flags & SURICATA_STOP) {
@@ -484,7 +483,7 @@ static TmEcode WinDivertRecvHelper(ThreadVars *tv, WinDivertThreadVars *wd_tv)
     }
     SCLogDebug("Packet received, length %" PRId32 "", GET_PKT_LEN(p));
 
-    p->ts = WinDivertTimestampToTimeStamp(wd_tv, p->windivert_v.addr.Timestamp);
+    p->ts = WinDivertTimestampToTimeval(wd_tv, p->windivert_v.addr.Timestamp);
     p->windivert_v.thread_num = wd_tv->thread_num;
 
 #ifdef COUNTERS
@@ -523,14 +522,14 @@ TmEcode ReceiveWinDivertThreadInit(ThreadVars *tv, const void *initdata,
     WinDivertThreadVars *wd_tv = (WinDivertThreadVars *)initdata;
 
     if (wd_tv == NULL) {
-        SCLogError("initdata == NULL");
+        SCLogError(SC_ERR_INVALID_ARGUMENT, "initdata == NULL");
         SCReturnInt(TM_ECODE_FAILED);
     }
 
     WinDivertQueueVars *wd_qv = WinDivertGetQueue(wd_tv->thread_num);
 
     if (wd_qv == NULL) {
-        SCLogError("queue == NULL");
+        SCLogError(SC_ERR_INVALID_ARGUMENT, "queue == NULL");
         SCReturnInt(TM_ECODE_FAILED);
     }
 
@@ -546,7 +545,8 @@ TmEcode ReceiveWinDivertThreadInit(ThreadVars *tv, const void *initdata,
     if (WinDivertCollectFilterDevices(wd_tv, wd_qv) == TM_ECODE_OK) {
         WinDivertDisableOffloading(wd_tv);
     } else {
-        SCLogWarning("Failed to obtain network devices for WinDivert filter");
+        SCLogWarning(SC_ERR_SYSCALL,
+                     "Failed to obtain network devices for WinDivert filter");
     }
 
     /* we open now so that we can immediately start handling packets,
@@ -639,7 +639,8 @@ static bool WinDivertIfaceMatchFilter(const char *filter_string, int if_index)
     if (!match) {
         int err = GetLastError();
         if (err != 0) {
-            SCLogWarning("Failed to evaluate filter: 0x%" PRIx32, err);
+            SCLogWarning(SC_ERR_WINDIVERT_GENERIC,
+                         "Failed to evaluate filter: 0x%" PRIx32, err);
         }
     }
 
@@ -711,7 +712,7 @@ void ReceiveWinDivertThreadExitStats(ThreadVars *tv, void *data)
     WinDivertThreadVars *wd_tv = (WinDivertThreadVars *)data;
     WinDivertQueueVars *wd_qv = WinDivertGetQueue(wd_tv->thread_num);
     if (wd_qv == NULL) {
-        SCLogError("queue == NULL");
+        SCLogError(SC_ERR_INVALID_ARGUMENT, "queue == NULL");
         SCReturn;
     }
 
@@ -752,6 +753,9 @@ static TmEcode WinDivertVerdictHelper(ThreadVars *tv, Packet *p)
     SCEnter();
     WinDivertThreadVars *wd_tv = WinDivertGetThread(p->windivert_v.thread_num);
 
+    /* update counters */
+    CaptureStatsUpdate(tv, &wd_tv->stats, p);
+
 #ifdef COUNTERS
     WinDivertQueueVars *wd_qv = WinDivertGetQueue(wd_tv->thread_num);
 #endif /* COUNTERS */
@@ -771,7 +775,7 @@ static TmEcode WinDivertVerdictHelper(ThreadVars *tv, Packet *p)
 
     /* we can't verdict tunnel packets without ensuring all encapsulated
      * packets are verdicted */
-    if (PacketIsTunnel(p)) {
+    if (IS_TUNNEL_PKT(p)) {
         bool finalVerdict = VerdictTunnelPacket(p);
         if (!finalVerdict) {
             SCReturnInt(TM_ECODE_OK);
@@ -785,7 +789,7 @@ static TmEcode WinDivertVerdictHelper(ThreadVars *tv, Packet *p)
 
     /* DROP simply means we do nothing; the WinDivert driver does the rest.
      */
-    if (PacketCheckAction(p, ACTION_DROP)) {
+    if (PACKET_TEST_ACTION(p, ACTION_DROP)) {
 #ifdef COUNTERS
         SCMutexLock(&wd_qv->counters_mutex);
         wd_qv->dropped++;
@@ -822,6 +826,9 @@ TmEcode VerdictWinDivertThreadInit(ThreadVars *tv, const void *initdata,
     SCEnter();
 
     WinDivertThreadVars *wd_tv = (WinDivertThreadVars *)initdata;
+
+    CaptureStatsSetup(tv, &wd_tv->stats);
+
     *data = wd_tv;
 
     SCReturnInt(TM_ECODE_OK);
@@ -928,7 +935,8 @@ static TmEcode WinDivertCloseHelper(WinDivertThreadVars *wd_tv)
     }
 
     if (!WinDivertClose(wd_qv->filter_handle)) {
-        SCLogError("WinDivertClose failed: error %" PRIu32 "", (uint32_t)(GetLastError()));
+        SCLogError(SC_ERR_FATAL, "WinDivertClose failed: error %" PRIu32 "",
+                   (uint32_t)(GetLastError()));
         ret = TM_ECODE_FAILED;
         goto unlock;
     }
@@ -992,7 +1000,7 @@ static int SourceWinDivertTestIfaceMatchFilter(void)
 /**
  * \brief this function registers unit tests for the WinDivert Source
  */
-void SourceWinDivertRegisterTests(void)
+void SourceWinDivertRegisterTests()
 {
 #ifdef UNITTESTS
     UtRegisterTest("SourceWinDivertTestIfaceMatchFilter",

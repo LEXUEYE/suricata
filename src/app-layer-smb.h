@@ -15,15 +15,9 @@
  * 02110-1301, USA.
  */
 
-/**
- * \file
- *
- * SMB protocol handling
- */
-
-#ifndef SURICATA_APP_LAYER_SMB_H
-#define SURICATA_APP_LAYER_SMB_H
+#ifndef __APP_LAYER_SMB_H__
+#define __APP_LAYER_SMB_H__
 
 void RegisterSMBParsers(void);
 
-#endif /* !SURICATA_APP_LAYER_SMB_H */
+#endif /* !__APP_LAYER_SMB_H__ */

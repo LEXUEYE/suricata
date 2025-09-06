@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_UTIL_CLOCK_H
-#define SURICATA_UTIL_CLOCK_H
+#ifndef __UTIL_CLOCK_H__
+#define __UTIL_CLOCK_H__
 
 #include <time.h>
 
@@ -33,7 +33,8 @@
 
 #define CLOCK_END           clo2 = clock()
 
-#define CLOCK_PRINT_SEC                                                                            \
-    printf("Seconds spent: %.4fs\n", ((double)(clo2 - clo1) / (double)CLOCKS_PER_SEC))
+#define CLOCK_PRINT_SEC     printf("Seconds spent: %.4fs\n", ((clo2 - clo1)/(double)CLOCKS_PER_SEC))
 
-#endif /*SURICATA_UTIL_CLOCK_H */
+#define GET_CLOCK_END_SECS  ((clo1 - clo2)/(double)CLOCKS_PER_SEC)
+
+#endif /*__UTIL_CLOCK_H__ */

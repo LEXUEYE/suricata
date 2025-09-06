@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_TM_QUEUEHANDLERS_H
-#define SURICATA_TM_QUEUEHANDLERS_H
+#ifndef __TM_QUEUEHANDLERS_H__
+#define __TM_QUEUEHANDLERS_H__
 
 enum {
     TMQH_NOT_SET,
@@ -51,4 +51,5 @@ int TmqhNameToID(const char *name);
 Tmqh *TmqhGetQueueHandlerByName(const char *name);
 Tmqh *TmqhGetQueueHandlerByID(const int id);
 
-#endif /* SURICATA_TM_QUEUEHANDLERS_H */
+#endif /* __TM_QUEUEHANDLERS_H__ */
+

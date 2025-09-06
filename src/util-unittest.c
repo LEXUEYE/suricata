@@ -44,8 +44,8 @@
 
 #ifdef UNITTESTS
 
-static pcre2_code *parse_regex;
-static pcre2_match_data *parse_regex_match;
+static pcre *parse_regex;
+static pcre_extra *parse_regex_study;
 
 static UtTest *ut_list;
 
@@ -124,31 +124,34 @@ void UtRegisterTest(const char *name, int(*TestFn)(void))
  */
 static int UtRegex (const char *regex_arg)
 {
-    int en;
-    PCRE2_SIZE eo;
-    int opts = PCRE2_CASELESS;
+    const char *eb;
+    int eo;
+    int opts = PCRE_CASELESS;;
 
     if(regex_arg == NULL)
         return -1;
 
-    parse_regex =
-            pcre2_compile((PCRE2_SPTR8)regex_arg, PCRE2_ZERO_TERMINATED, opts, &en, &eo, NULL);
+    parse_regex = pcre_compile(regex_arg, opts, &eb, &eo, NULL);
     if(parse_regex == NULL)
     {
-        PCRE2_UCHAR errbuffer[256];
-        pcre2_get_error_message(en, errbuffer, sizeof(errbuffer));
-        SCLogError("pcre2 compile of \"%s\" failed at "
-                   "offset %d: %s",
-                regex_arg, (int)eo, errbuffer);
+        printf("pcre compile of \"%s\" failed at offset %" PRId32 ": %s\n", regex_arg, eo, eb);
         goto error;
     }
-    parse_regex_match = pcre2_match_data_create_from_pattern(parse_regex, NULL);
+
+    parse_regex_study = pcre_study(parse_regex, 0, &eb);
+    if(eb != NULL)
+    {
+        printf("pcre study failed: %s\n", eb);
+        goto error;
+    }
 
     return 1;
 
 error:
     return -1;
 }
+
+#define MAX_SUBSTRINGS 30
 
 /** \brief List all registered unit tests.
  *
@@ -158,13 +161,14 @@ void UtListTests(const char *regex_arg)
 {
     UtTest *ut;
     int ret = 0, rcomp = 0;
+    int ov[MAX_SUBSTRINGS];
 
     rcomp = UtRegex(regex_arg);
 
     for (ut = ut_list; ut != NULL; ut = ut->next) {
         if (rcomp == 1)  {
-            ret = pcre2_match(parse_regex, (PCRE2_SPTR8)ut->name, strlen(ut->name), 0, 0,
-                    parse_regex_match, NULL);
+            ret = pcre_exec(parse_regex, parse_regex_study, ut->name,
+                strlen(ut->name), 0, 0, ov, MAX_SUBSTRINGS);
             if (ret >= 1) {
                 printf("%s\n", ut->name);
             }
@@ -173,8 +177,6 @@ void UtListTests(const char *regex_arg)
             printf("%s\n", ut->name);
         }
     }
-    pcre2_code_free(parse_regex);
-    pcre2_match_data_free(parse_regex_match);
 }
 
 /** \brief Run all registered unittests.
@@ -190,6 +192,7 @@ uint32_t UtRunTests(const char *regex_arg)
     UtTest *ut;
     uint32_t good = 0, bad = 0, matchcnt = 0;
     int ret = 0, rcomp = 0;
+    int ov[MAX_SUBSTRINGS];
 
     StreamTcpInitMemuse();
     StreamTcpReassembleInitMemuse();
@@ -198,8 +201,7 @@ uint32_t UtRunTests(const char *regex_arg)
 
     if(rcomp == 1){
         for (ut = ut_list; ut != NULL; ut = ut->next) {
-            ret = pcre2_match(parse_regex, (PCRE2_SPTR8)ut->name, strlen(ut->name), 0, 0,
-                    parse_regex_match, NULL);
+            ret = pcre_exec(parse_regex, parse_regex_study, ut->name, strlen(ut->name), 0, 0, ov, MAX_SUBSTRINGS);
             if( ret >= 1 )  {
                 printf("Test %-60.60s : ", ut->name);
                 matchcnt++;
@@ -249,8 +251,6 @@ uint32_t UtRunTests(const char *regex_arg)
     } else {
         SCLogInfo("UtRunTests: pcre compilation failed");
     }
-    pcre2_code_free(parse_regex);
-    pcre2_match_data_free(parse_regex_match);
     return bad;
 }
 /**
@@ -282,7 +282,12 @@ void UtCleanup(void)
 
 void UtRunModeRegister(void)
 {
-    RunModeRegisterNewRunMode(RUNMODE_UNITTEST, "unittest", "Unittest mode", NULL, NULL);
+    RunModeRegisterNewRunMode(RUNMODE_UNITTEST,
+                              "unittest",
+                              "Unittest mode",
+                              NULL);
+
+    return;
 }
 
 /*

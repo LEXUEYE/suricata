@@ -1,8 +1,7 @@
 Custom http logging
 ===================
 
-.. attention:: http-log is deprecated in Suricata 8.0 and will be
-               removed in Suricata 9.0.
+As of Suricata 1.3.1 you can enable a custom http logging option.
 
 In your Suricata.yaml, find the http-log section and edit as follows:
 

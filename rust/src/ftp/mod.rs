@@ -15,180 +15,161 @@
  * 02110-1301, USA.
  */
 
-//! FTP parser and application layer module.
+extern crate nom;
 
-use nom7::bytes::complete::{tag, take_until};
-use nom7::character::complete::{digit1, multispace0};
-use nom7::combinator::{complete, map_res, opt, verify};
-use nom7::sequence::{delimited, tuple};
-use nom7::{Err, IResult};
-use std;
+use nom::character::complete::{digit1, multispace0};
 use std::str;
+use std;
 use std::str::FromStr;
-
-pub mod constant;
-pub mod event;
-pub mod ftp;
-pub mod response;
 
 // We transform an integer string into a i64, ignoring surrounding whitespaces
 // We look for a digit suite, and try to convert it.
 // If either str::from_utf8 or FromStr::from_str fail,
 // we fallback to the parens parser defined above
-fn getu16(i: &[u8]) -> IResult<&[u8], u16> {
-    map_res(
-        map_res(delimited(multispace0, digit1, multispace0), str::from_utf8),
-        FromStr::from_str,
-    )(i)
-}
+named!(getu16<u16>,
+    map_res!(
+      map_res!(
+        delimited!(multispace0, digit1, multispace0),
+        str::from_utf8
+      ),
+      FromStr::from_str
+    )
+);
 
-fn parse_u16(i: &[u8]) -> IResult<&[u8], u16> {
-    map_res(map_res(digit1, str::from_utf8), u16::from_str)(i)
-}
+named!(parse_u16<u16>,
+    map_res!(map_res!(digit1, str::from_utf8), u16::from_str));
+
 
 // PORT 192,168,0,13,234,10
-fn ftp_active_port(i: &[u8]) -> IResult<&[u8], u16> {
-    let (i, _) = tag("PORT")(i)?;
-    let (i, _) = delimited(multispace0, digit1, multispace0)(i)?;
-    let (i, _) = tuple((
-        tag(","),
-        digit1,
-        tag(","),
-        digit1,
-        tag(","),
-        digit1,
-        tag(","),
-    ))(i)?;
-    let (i, part1) = verify(parse_u16, |&v| v <= u8::MAX as u16)(i)?;
-    let (i, _) = tag(",")(i)?;
-    let (i, part2) = verify(parse_u16, |&v| v <= u8::MAX as u16)(i)?;
-    Ok((i, part1 * 256 + part2))
-}
+named!(pub ftp_active_port<u16>,
+       do_parse!(
+            tag!("PORT") >>
+            delimited!(multispace0, digit1, multispace0) >> tag!(",") >> digit1 >> tag!(",") >>
+            digit1 >> tag!(",") >> digit1 >> tag!(",") >>
+            part1: verify!(parse_u16, |&v| v <= std::u8::MAX as u16) >>
+            tag!(",") >>
+            part2: verify!(parse_u16, |&v| v <= std::u8::MAX as u16) >>
+            (
+                part1 * 256 + part2
+            )
+        )
+);
 
 // 227 Entering Passive Mode (212,27,32,66,221,243).
-fn ftp_pasv_response(i: &[u8]) -> IResult<&[u8], u16> {
-    let (i, _) = tag("227")(i)?;
-    let (i, _) = take_until("(")(i)?;
-    let (i, _) = tag("(")(i)?;
-    let (i, _) = tuple((
-        digit1,
-        tag(","),
-        digit1,
-        tag(","),
-        digit1,
-        tag(","),
-        digit1,
-        tag(","),
-    ))(i)?;
-    let (i, part1) = verify(getu16, |&v| v <= u8::MAX as u16)(i)?;
-    let (i, _) = tag(",")(i)?;
-    let (i, part2) = verify(getu16, |&v| v <= u8::MAX as u16)(i)?;
-    // may also be completed by a final point
-    let (i, _) = tag(")")(i)?;
-    let (i, _) = opt(complete(tag(".")))(i)?;
-    Ok((i, part1 * 256 + part2))
-}
+named!(pub ftp_pasv_response<u16>,
+       do_parse!(
+            tag!("227") >>
+            take_until!("(") >>
+            tag!("(") >>
+            digit1 >> tag!(",") >> digit1 >> tag!(",") >>
+            digit1 >> tag!(",") >> digit1 >> tag!(",") >>
+            part1: verify!(getu16, |&v| v <= std::u8::MAX as u16) >>
+            tag!(",") >>
+            part2: verify!(getu16, |&v| v <= std::u8::MAX as u16) >>
+            // may also be completed by a final point
+            tag!(")") >> opt!(complete!(tag!("."))) >>
+            (
+                part1 * 256 + part2
+            )
+        )
+);
+
 
 #[no_mangle]
-pub unsafe extern "C" fn SCFTPParsePort(input: *const u8, len: u32) -> u16 {
-    if input.is_null() {
-        return 0;
-    }
+pub extern "C" fn rs_ftp_active_port(input: *const u8, len: u32) -> u16 {
     let buf = build_slice!(input, len as usize);
     match ftp_active_port(buf) {
         Ok((_, dport)) => {
             return dport;
-        }
-        Err(Err::Incomplete(_)) => {
+        },
+        Err(nom::Err::Incomplete(_)) => {
             SCLogDebug!("port incomplete: '{:?}'", buf);
-        }
+        },
         Err(_) => {
             SCLogDebug!("port error on '{:?}'", buf);
-        }
+        },
     }
     return 0;
 }
 
+
 #[no_mangle]
-pub unsafe extern "C" fn SCFTPParsePortPasv(input: *const u8, len: u32) -> u16 {
-    if input.is_null() {
-        return 0;
-    }
-    let buf = build_slice!(input, len as usize);
+pub extern "C" fn rs_ftp_pasv_response(input: *const u8, len: u32) -> u16 {
+    let buf = unsafe{std::slice::from_raw_parts(input, len as usize)};
     match ftp_pasv_response(buf) {
         Ok((_, dport)) => {
             return dport;
-        }
-        Err(Err::Incomplete(_)) => {
+        },
+        Err(nom::Err::Incomplete(_)) => {
             SCLogDebug!("pasv incomplete: '{:?}'", String::from_utf8_lossy(buf));
-        }
+        },
         Err(_) => {
             SCLogDebug!("pasv error on '{:?}'", String::from_utf8_lossy(buf));
-        }
+        },
     }
     return 0;
 }
 
 // 229 Entering Extended Passive Mode (|||48758|).
-pub fn ftp_epsv_response(i: &[u8]) -> IResult<&[u8], u16> {
-    let (i, _) = tag("229")(i)?;
-    let (i, _) = take_until("|||")(i)?;
-    let (i, _) = tag("|||")(i)?;
-    let (i, port) = getu16(i)?;
-    let (i, _) = tag("|)")(i)?;
-    let (i, _) = opt(complete(tag(".")))(i)?;
-    Ok((i, port))
-}
+named!(pub ftp_epsv_response<u16>,
+       do_parse!(
+            tag!("229") >>
+            take_until!("|||") >>
+            tag!("|||") >>
+            port: getu16 >>
+            tag!("|)") >> opt!(complete!(tag!("."))) >>
+            (
+                port
+            )
+        )
+);
 
 // EPRT |2|2a01:e34:ee97:b130:8c3e:45ea:5ac6:e301|41813|
-fn ftp_active_eprt(i: &[u8]) -> IResult<&[u8], u16> {
-    let (i, _) = tag("EPRT")(i)?;
-    let (i, _) = take_until("|")(i)?;
-    let (i, _) = tag("|")(i)?;
-    let (i, _) = take_until("|")(i)?;
-    let (i, _) = tag("|")(i)?;
-    let (i, _) = take_until("|")(i)?;
-    let (i, _) = tag("|")(i)?;
-    let (i, port) = getu16(i)?;
-    let (i, _) = tag("|")(i)?;
-    Ok((i, port))
-}
+named!(pub ftp_active_eprt<u16>,
+       do_parse!(
+            tag!("EPRT") >>
+            take_until_and_consume!("|") >>
+            take_until_and_consume!("|") >>
+            take_until_and_consume!("|") >>
+            port: getu16 >>
+            tag!("|") >>
+            (
+                port
+            )
+        )
+);
 
 #[no_mangle]
-pub unsafe extern "C" fn SCFTPParsePortEprt(input: *const u8, len: u32) -> u16 {
-    if input.is_null() {
-        return 0;
-    }
+pub extern "C" fn rs_ftp_active_eprt(input: *const u8, len: u32) -> u16 {
     let buf = build_slice!(input, len as usize);
     match ftp_active_eprt(buf) {
         Ok((_, dport)) => {
             return dport;
-        }
-        Err(Err::Incomplete(_)) => {
+        },
+        Err(nom::Err::Incomplete(_)) => {
             SCLogDebug!("eprt incomplete: '{:?}'", String::from_utf8_lossy(buf));
-        }
+        },
         Err(_) => {
             SCLogDebug!("epsv incomplete: '{:?}'", String::from_utf8_lossy(buf));
-        }
+        },
+
     }
     return 0;
 }
 #[no_mangle]
-pub unsafe extern "C" fn SCFTPParsePortEpsv(input: *const u8, len: u32) -> u16 {
-    if input.is_null() {
-        return 0;
-    }
-    let buf = build_slice!(input, len as usize);
+pub extern "C" fn rs_ftp_epsv_response(input: *const u8, len: u32) -> u16 {
+    let buf = unsafe{std::slice::from_raw_parts(input, len as usize)};
     match ftp_epsv_response(buf) {
         Ok((_, dport)) => {
             return dport;
-        }
-        Err(Err::Incomplete(_)) => {
+        },
+        Err(nom::Err::Incomplete(_)) => {
             SCLogDebug!("epsv incomplete: '{:?}'", String::from_utf8_lossy(buf));
-        }
+        },
         Err(_) => {
             SCLogDebug!("epsv incomplete: '{:?}'", String::from_utf8_lossy(buf));
-        }
+        },
+
     }
     return 0;
 }
@@ -199,25 +180,20 @@ mod test {
 
     #[test]
     fn test_pasv_response_valid() {
-        let port =
-            ftp_pasv_response("227 Entering Passive Mode (212,27,32,66,221,243).".as_bytes());
+        let port = ftp_pasv_response("227 Entering Passive Mode (212,27,32,66,221,243).".as_bytes());
         assert_eq!(port, Ok((&b""[..], 56819)));
-        let port_notdot =
-            ftp_pasv_response("227 Entering Passive Mode (212,27,32,66,221,243)".as_bytes());
+        let port_notdot = ftp_pasv_response("227 Entering Passive Mode (212,27,32,66,221,243)".as_bytes());
         assert_eq!(port_notdot, Ok((&b""[..], 56819)));
 
-        let port_epsv_dot =
-            ftp_epsv_response("229 Entering Extended Passive Mode (|||48758|).".as_bytes());
+        let port_epsv_dot = ftp_epsv_response("229 Entering Extended Passive Mode (|||48758|).".as_bytes());
         assert_eq!(port_epsv_dot, Ok((&b""[..], 48758)));
-        let port_epsv_nodot =
-            ftp_epsv_response("229 Entering Extended Passive Mode (|||48758|)".as_bytes());
+        let port_epsv_nodot = ftp_epsv_response("229 Entering Extended Passive Mode (|||48758|)".as_bytes());
         assert_eq!(port_epsv_nodot, Ok((&b""[..], 48758)));
     }
 
     #[test]
     fn test_active_eprt_valid() {
-        let port =
-            ftp_active_eprt("EPRT |2|2a01:e34:ee97:b130:8c3e:45ea:5ac6:e301|41813|".as_bytes());
+        let port = ftp_active_eprt("EPRT |2|2a01:e34:ee97:b130:8c3e:45ea:5ac6:e301|41813|".as_bytes());
         assert_eq!(port, Ok((&b""[..], 41813)));
     }
 
@@ -230,19 +206,16 @@ mod test {
     // A port that is too large for a u16.
     #[test]
     fn test_pasv_response_too_large() {
-        let port =
-            ftp_pasv_response("227 Entering Passive Mode (212,27,32,66,257,243).".as_bytes());
+        let port = ftp_pasv_response("227 Entering Passive Mode (212,27,32,66,257,243).".as_bytes());
         assert!(port.is_err());
 
-        let port =
-            ftp_pasv_response("227 Entering Passive Mode (212,27,32,66,255,65535).".as_bytes());
+        let port = ftp_pasv_response("227 Entering Passive Mode (212,27,32,66,255,65535).".as_bytes());
         assert!(port.is_err());
     }
 
     #[test]
     fn test_active_eprt_too_large() {
-        let port =
-            ftp_active_eprt("EPRT |2|2a01:e34:ee97:b130:8c3e:45ea:5ac6:e301|81813|".as_bytes());
+        let port = ftp_active_eprt("EPRT |2|2a01:e34:ee97:b130:8c3e:45ea:5ac6:e301|81813|".as_bytes());
         assert!(port.is_err());
     }
 

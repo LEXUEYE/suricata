@@ -21,11 +21,11 @@
  * Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_OUTPUT_JSON_FLOW_H
-#define SURICATA_OUTPUT_JSON_FLOW_H
+#ifndef __OUTPUT_JSON_FLOW_H__
+#define __OUTPUT_JSON_FLOW_H__
 
 void JsonFlowLogRegister(void);
-void EveAddFlow(Flow *f, SCJsonBuilder *js);
-void EveAddAppProto(Flow *f, SCJsonBuilder *js);
+void EveAddFlow(Flow *f, JsonBuilder *js);
+void EveAddAppProto(Flow *f, JsonBuilder *js);
 
-#endif /* SURICATA_OUTPUT_JSON_FLOW_H */
+#endif /* __OUTPUT_JSON_FLOW_H__ */

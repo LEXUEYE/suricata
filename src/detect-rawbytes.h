@@ -21,10 +21,11 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_RAWBYTES_H
-#define SURICATA_DETECT_RAWBYTES_H
+#ifndef __DETECT_RAWBYTES_H__
+#define __DETECT_RAWBYTES_H__
 
 /* prototypes */
 void DetectRawbytesRegister (void);
 
-#endif /* SURICATA_DETECT_RAWBYTES_H */
+#endif /* __DETECT_RAWBYTES_H__ */
+

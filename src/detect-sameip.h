@@ -21,10 +21,10 @@
  * \author Brian Rectanus <brectanu@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_SAMEIP_H
-#define SURICATA_DETECT_SAMEIP_H
+#ifndef __DETECT_SAMEIP_H__
+#define __DETECT_SAMEIP_H__
 
 /* prototypes */
 void DetectSameipRegister(void);
 
-#endif /* SURICATA_DETECT_SAMEIP_H */
+#endif /* __DETECT_SAMEIP_H__ */

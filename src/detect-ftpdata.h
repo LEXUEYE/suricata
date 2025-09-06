@@ -21,13 +21,14 @@
  * \author Eric Leblond <eric@regit.org>
  */
 
-#ifndef SURICATA_DETECT_FTPDATA_H
-#define SURICATA_DETECT_FTPDATA_H
+#ifndef __DETECT_FTPDATA_H__
+#define __DETECT_FTPDATA_H__
 
+#include "detect-engine.h"
 #include "app-layer-ftp.h"
 
 /** Per keyword data. This is set up by the DetectFtpcommandSetup() function.
- *  Each signature will have an instance of DetectFtpcommandData per occurrence
+ *  Each signature will have an instance of DetectFtpcommandData per occurence
  *  of the keyword.
  *  The structure should be considered static/readonly after initialization.
  */
@@ -39,4 +40,4 @@ typedef struct DetectFtpdataData_ {
  *         detect.c::SigTableSetup() */
 void DetectFtpdataRegister(void);
 
-#endif /* SURICATA_DETECT_FTPDATA_H */
+#endif /* __DETECT_FTPDATA_H__ */

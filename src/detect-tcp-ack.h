@@ -21,8 +21,8 @@
  * \author Brian Rectanus <brectanu@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_ACK_H
-#define SURICATA_DETECT_ACK_H
+#ifndef __DETECT_ACK_H__
+#define __DETECT_ACK_H__
 
 /**
  * \brief ack data
@@ -36,4 +36,4 @@ typedef struct DetectAckData_ {
  */
 void DetectAckRegister(void);
 
-#endif /* SURICATA_DETECT_ACK_H */
+#endif /* __DETECT_ACK_H__ */

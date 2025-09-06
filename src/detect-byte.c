@@ -22,7 +22,6 @@
  */
 
 #include "suricata-common.h"
-#include "rust.h"
 #include "detect-byte.h"
 #include "detect-byte-extract.h"
 #include "detect-bytemath.h"
@@ -32,22 +31,20 @@
  *
  * \param arg The name of the variable being sought
  * \param s The signature to check for the variable
- * \param sm_list The caller's matching buffer
  * \param index When found, the value of the slot within the byte vars
  *
  * \retval true A match for the variable was found.
  * \retval false
  */
-bool DetectByteRetrieveSMVar(
-        const char *arg, const Signature *s, int sm_list, DetectByteIndexType *index)
+bool DetectByteRetrieveSMVar(const char *arg, const Signature *s, DetectByteIndexType *index)
 {
-    SigMatch *bed_sm = DetectByteExtractRetrieveSMVar(arg, sm_list, s);
+    SigMatch *bed_sm = DetectByteExtractRetrieveSMVar(arg, s);
     if (bed_sm != NULL) {
-        *index = ((SCDetectByteExtractData *)bed_sm->ctx)->local_id;
+        *index = ((DetectByteExtractData *)bed_sm->ctx)->local_id;
         return true;
     }
 
-    SigMatch *bmd_sm = DetectByteMathRetrieveSMVar(arg, sm_list, s);
+    SigMatch *bmd_sm = DetectByteMathRetrieveSMVar(arg, s);
     if (bmd_sm != NULL) {
         *index = ((DetectByteMathData *)bmd_sm->ctx)->local_id;
         return true;

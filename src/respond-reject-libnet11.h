@@ -22,8 +22,8 @@
  *  \author William Metcalf <william.metcalf@gmail.com>
  */
 
-#ifndef SURICATA_RESPOND_REJECT_LIBNET11_H
-#define SURICATA_RESPOND_REJECT_LIBNET11_H
+#ifndef __RESPOND_REJECT_LIBNET11_H__
+#define __RESPOND_REJECT_LIBNET11_H__
 
 int RejectSendLibnet11IPv4TCP(ThreadVars *, Packet *, void *, enum RejectDirection);
 int RejectSendLibnet11IPv4ICMP(ThreadVars *, Packet *, void *, enum RejectDirection);
@@ -33,4 +33,4 @@ int RejectSendLibnet11IPv6ICMP(ThreadVars *, Packet *, void *, enum RejectDirect
 
 void FreeCachedCtx(void);
 
-#endif /* SURICATA_RESPOND_REJECT_LIBNET11_H */
+#endif /* __RESPOND_REJECT_LIBNET11_H__ */

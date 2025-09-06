@@ -16,121 +16,139 @@
  */
 
 use super::ssh::SSHTransaction;
-use crate::direction::Direction;
+use crate::core::STREAM_TOCLIENT;
 use std::ptr;
 
 #[no_mangle]
-pub unsafe extern "C" fn SCSshTxGetProtocol(
+pub extern "C" fn rs_ssh_tx_get_protocol(
     tx: *mut std::os::raw::c_void, buffer: *mut *const u8, buffer_len: *mut u32, direction: u8,
 ) -> u8 {
     let tx = cast_pointer!(tx, SSHTransaction);
-    match direction.into() {
-        Direction::ToServer => {
-            let m = &tx.cli_hdr.protover;
-            if !m.is_empty() {
+    if direction & STREAM_TOCLIENT != 0 {
+        let m = &tx.srv_hdr.protover;
+        if m.len() > 0 {
+            unsafe {
                 *buffer = m.as_ptr();
                 *buffer_len = m.len() as u32;
-                return 1;
             }
+            return 1;
         }
-        Direction::ToClient => {
-            let m = &tx.srv_hdr.protover;
-            if !m.is_empty() {
+    } else {
+        let m = &tx.cli_hdr.protover;
+        if m.len() > 0 {
+            unsafe {
                 *buffer = m.as_ptr();
                 *buffer_len = m.len() as u32;
-                return 1;
             }
+            return 1;
         }
     }
-    *buffer = ptr::null();
-    *buffer_len = 0;
+    unsafe {
+        *buffer = ptr::null();
+        *buffer_len = 0;
+    }
 
     return 0;
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn SCSshTxGetSoftware(
+pub extern "C" fn rs_ssh_tx_get_software(
     tx: *mut std::os::raw::c_void, buffer: *mut *const u8, buffer_len: *mut u32, direction: u8,
 ) -> u8 {
     let tx = cast_pointer!(tx, SSHTransaction);
-    match direction.into() {
-        Direction::ToServer => {
-            let m = &tx.cli_hdr.swver;
-            if !m.is_empty() {
+    if direction & STREAM_TOCLIENT != 0 {
+        let m = &tx.srv_hdr.swver;
+        if m.len() > 0 {
+            unsafe {
                 *buffer = m.as_ptr();
                 *buffer_len = m.len() as u32;
-                return 1;
             }
+            return 1;
         }
-        Direction::ToClient => {
-            let m = &tx.srv_hdr.swver;
-            if !m.is_empty() {
+    } else {
+        let m = &tx.cli_hdr.swver;
+        if m.len() > 0 {
+            unsafe {
                 *buffer = m.as_ptr();
                 *buffer_len = m.len() as u32;
-                return 1;
             }
+            return 1;
         }
     }
-    *buffer = ptr::null();
-    *buffer_len = 0;
+    unsafe {
+        *buffer = ptr::null();
+        *buffer_len = 0;
+    }
 
     return 0;
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn SCSshTxGetHassh(
-    tx: *mut std::os::raw::c_void, buffer: *mut *const u8, buffer_len: *mut u32, direction: u8,
+pub extern "C" fn rs_ssh_tx_get_hassh(
+    tx: *mut std::os::raw::c_void,
+    buffer: *mut *const u8,
+    buffer_len: *mut u32,
+    direction: u8,
 ) -> u8 {
     let tx = cast_pointer!(tx, SSHTransaction);
-    match direction.into() {
-        Direction::ToServer => {
-            let m = &tx.cli_hdr.hassh;
-            if !m.is_empty() {
+    if direction & STREAM_TOCLIENT != 0 {
+        let m = &tx.srv_hdr.hassh;
+        if m.len() > 0 {
+            unsafe {
                 *buffer = m.as_ptr();
                 *buffer_len = m.len() as u32;
-                return 1;
             }
+            return 1;
         }
-        Direction::ToClient => {
-            let m = &tx.srv_hdr.hassh;
-            if !m.is_empty() {
+    } else {
+        let m = &tx.cli_hdr.hassh;
+        if m.len() > 0 {
+            unsafe {
                 *buffer = m.as_ptr();
                 *buffer_len = m.len() as u32;
-                return 1;
             }
+            return 1;
         }
     }
-    *buffer = ptr::null();
-    *buffer_len = 0;
+    unsafe {
+        *buffer = ptr::null();
+        *buffer_len = 0;
+    }
 
     return 0;
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn SCSshTxGetHasshString(
-    tx: *mut std::os::raw::c_void, buffer: *mut *const u8, buffer_len: *mut u32, direction: u8,
+pub extern "C" fn rs_ssh_tx_get_hassh_string(
+    tx: *mut std::os::raw::c_void,
+    buffer: *mut *const u8,
+    buffer_len: *mut u32,
+    direction: u8,
 ) -> u8 {
     let tx = cast_pointer!(tx, SSHTransaction);
-    match direction.into() {
-        Direction::ToServer => {
-            let m = &tx.cli_hdr.hassh_string;
-            if !m.is_empty() {
+    if direction & STREAM_TOCLIENT != 0 {
+        let m = &tx.srv_hdr.hassh_string;
+        if m.len() > 0 {
+            unsafe {
                 *buffer = m.as_ptr();
                 *buffer_len = m.len() as u32;
-                return 1;
             }
+            return 1;
         }
-        Direction::ToClient => {
-            let m = &tx.srv_hdr.hassh_string;
-            if !m.is_empty() {
+    } else {
+        let m = &tx.cli_hdr.hassh_string;
+        if m.len() > 0 {
+            unsafe {
                 *buffer = m.as_ptr();
                 *buffer_len = m.len() as u32;
-                return 1;
             }
+            return 1;
         }
     }
-    *buffer = ptr::null();
-    *buffer_len = 0;
+    unsafe {
+        *buffer = ptr::null();
+        *buffer_len = 0;
+    }
 
     return 0;
 }

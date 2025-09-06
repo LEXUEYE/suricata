@@ -21,10 +21,11 @@
  * \author Brian Rectanus <brectanu@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_HTTP_METHOD_H
-#define SURICATA_DETECT_HTTP_METHOD_H
+#ifndef __DETECT_HTTP_METHOD_H__
+#define __DETECT_HTTP_METHOD_H__
 
 /* prototypes */
 void DetectHttpMethodRegister(void);
 
-#endif /* SURICATA_DETECT_HTTP_METHOD_H */
+#endif /* __DETECT_HTTP_METHOD_H__ */
+

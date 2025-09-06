@@ -48,6 +48,9 @@
 #define SC_CLASS_CONF_DEF_CONF_FILEPATH CONFIG_DIR "/classification.config"
 #endif
 
+static pcre *regex = NULL;
+static pcre_extra *regex_study = NULL;
+
 uint32_t SCClassConfClasstypeHashFunc(HashTable *ht, void *data, uint16_t datalen);
 char SCClassConfClasstypeHashCompareFunc(void *data1, uint16_t datalen1,
                                          void *data2, uint16_t datalen2);
@@ -58,35 +61,38 @@ static SCClassConfClasstype *SCClassConfAllocClasstype(uint16_t classtype_id,
         const char *classtype, const char *classtype_desc, int priority);
 static void SCClassConfDeAllocClasstype(SCClassConfClasstype *ct);
 
-void SCClassSCConfInit(DetectEngineCtx *de_ctx)
+void SCClassConfInit(void)
 {
-    int en;
-    PCRE2_SIZE eo;
+    const char *eb = NULL;
+    int eo;
     int opts = 0;
 
-    de_ctx->class_conf_regex = pcre2_compile(
-            (PCRE2_SPTR8)DETECT_CLASSCONFIG_REGEX, PCRE2_ZERO_TERMINATED, opts, &en, &eo, NULL);
-    if (de_ctx->class_conf_regex == NULL) {
-        PCRE2_UCHAR errbuffer[256];
-        pcre2_get_error_message(en, errbuffer, sizeof(errbuffer));
-        SCLogWarning("pcre2 compile of \"%s\" failed at "
-                     "offset %d: %s",
-                DETECT_CLASSCONFIG_REGEX, (int)eo, errbuffer);
+    regex = pcre_compile(DETECT_CLASSCONFIG_REGEX, opts, &eb, &eo, NULL);
+    if (regex == NULL) {
+        SCLogDebug("Compile of \"%s\" failed at offset %" PRId32 ": %s",
+                   DETECT_CLASSCONFIG_REGEX, eo, eb);
         return;
     }
-    de_ctx->class_conf_regex_match =
-            pcre2_match_data_create_from_pattern(de_ctx->class_conf_regex, NULL);
+
+    regex_study = pcre_study(regex, 0, &eb);
+    if (eb != NULL) {
+        pcre_free(regex);
+        regex = NULL;
+        SCLogDebug("pcre study failed: %s", eb);
+        return;
+    }
+    return;
 }
 
-void SCClassConfDeinit(DetectEngineCtx *de_ctx)
+void SCClassConfDeinit(void)
 {
-    if (de_ctx->class_conf_regex != NULL) {
-        pcre2_code_free(de_ctx->class_conf_regex);
-        de_ctx->class_conf_regex = NULL;
+    if (regex != NULL) {
+        pcre_free(regex);
+        regex = NULL;
     }
-    if (de_ctx->class_conf_regex_match != NULL) {
-        pcre2_match_data_free(de_ctx->class_conf_regex_match);
-        de_ctx->class_conf_regex_match = NULL;
+    if (regex_study != NULL) {
+        pcre_free(regex_study);
+        regex_study = NULL;
     }
 }
 
@@ -115,7 +121,7 @@ static FILE *SCClassConfInitContextAndLocalResources(DetectEngineCtx *de_ctx, FI
                                           SCClassConfClasstypeHashCompareFunc,
                                           SCClassConfClasstypeHashFree);
     if (de_ctx->class_conf_ht == NULL) {
-        SCLogError("Error initializing the hash "
+        SCLogError(SC_ERR_HASH_TABLE_INIT, "Error initializing the hash "
                    "table");
         return NULL;
     }
@@ -131,7 +137,8 @@ static FILE *SCClassConfInitContextAndLocalResources(DetectEngineCtx *de_ctx, FI
             if (RunmodeIsUnittests())
                 return NULL; // silently fail
 #endif
-            SCLogWarning("could not open: \"%s\": %s", filename, strerror(errno));
+            SCLogWarning(SC_ERR_FOPEN, "could not open: \"%s\": %s",
+                    filename, strerror(errno));
             return NULL;
         }
     }
@@ -160,13 +167,13 @@ static const char *SCClassConfGetConfFilename(const DetectEngineCtx *de_ctx)
 
         /* try loading prefix setting, fall back to global if that
          * fails. */
-        if (SCConfGet(config_value, &log_filename) != 1) {
-            if (SCConfGet("classification-file", &log_filename) != 1) {
+        if (ConfGet(config_value, &log_filename) != 1) {
+            if (ConfGet("classification-file", &log_filename) != 1) {
                 log_filename = (char *)SC_CLASS_CONF_DEF_CONF_FILEPATH;
             }
         }
     } else {
-        if (SCConfGet("classification-file", &log_filename) != 1) {
+        if (ConfGet("classification-file", &log_filename) != 1) {
             log_filename = (char *)SC_CLASS_CONF_DEF_CONF_FILEPATH;
         }
     }
@@ -177,10 +184,11 @@ static const char *SCClassConfGetConfFilename(const DetectEngineCtx *de_ctx)
 /**
  * \brief Releases resources used by the Classification Config API.
  */
-static void SCClassConfDeInitLocalResources(FILE *fd)
+static void SCClassConfDeInitLocalResources(DetectEngineCtx *de_ctx, FILE *fd)
 {
     if (fd != NULL) {
         fclose(fd);
+        fd = NULL;
     }
 }
 
@@ -193,6 +201,8 @@ void SCClassConfDeInitContext(DetectEngineCtx *de_ctx)
         HashTableFree(de_ctx->class_conf_ht);
 
     de_ctx->class_conf_ht = NULL;
+
+    return;
 }
 
 /**
@@ -206,13 +216,13 @@ static char *SCClassConfStringToLowercase(const char *str)
     char *temp_str = NULL;
 
     if ( (new_str = SCStrdup(str)) == NULL) {
-        SCLogError("Error allocating memory");
+        SCLogError(SC_ERR_MEM_ALLOC, "Error allocating memory");
         return NULL;
     }
 
     temp_str = new_str;
     while (*temp_str != '\0') {
-        *temp_str = u8_tolower((unsigned char)*temp_str);
+        *temp_str = tolower((unsigned char)*temp_str);
         temp_str++;
     }
 
@@ -241,41 +251,35 @@ int SCClassConfAddClasstype(DetectEngineCtx *de_ctx, char *rawstr, uint16_t inde
     SCClassConfClasstype *ct_new = NULL;
     SCClassConfClasstype *ct_lookup = NULL;
 
+#define MAX_SUBSTRINGS 30
     int ret = 0;
+    int ov[MAX_SUBSTRINGS];
 
-    ret = pcre2_match(de_ctx->class_conf_regex, (PCRE2_SPTR8)rawstr, strlen(rawstr), 0, 0,
-            de_ctx->class_conf_regex_match, NULL);
+    ret = pcre_exec(regex, regex_study, rawstr, strlen(rawstr), 0, 0, ov, 30);
     if (ret < 0) {
-        SCLogError("Invalid Classtype in "
-                   "classification.config file %s: \"%s\"",
-                SCClassConfGetConfFilename(de_ctx), rawstr);
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "Invalid Classtype in "
+                   "classification.config file");
         goto error;
     }
 
-    size_t copylen = sizeof(ct_name);
     /* retrieve the classtype name */
-    ret = pcre2_substring_copy_bynumber(
-            de_ctx->class_conf_regex_match, 1, (PCRE2_UCHAR8 *)ct_name, &copylen);
+    ret = pcre_copy_substring((char *)rawstr, ov, 30, 1, ct_name, sizeof(ct_name));
     if (ret < 0) {
-        SCLogInfo("pcre2_substring_copy_bynumber() failed");
+        SCLogInfo("pcre_copy_substring() failed");
         goto error;
     }
 
     /* retrieve the classtype description */
-    copylen = sizeof(ct_desc);
-    ret = pcre2_substring_copy_bynumber(
-            de_ctx->class_conf_regex_match, 2, (PCRE2_UCHAR8 *)ct_desc, &copylen);
+    ret = pcre_copy_substring((char *)rawstr, ov, 30, 2, ct_desc, sizeof(ct_desc));
     if (ret < 0) {
-        SCLogInfo("pcre2_substring_copy_bynumber() failed");
+        SCLogInfo("pcre_copy_substring() failed");
         goto error;
     }
 
     /* retrieve the classtype priority */
-    copylen = sizeof(ct_priority_str);
-    ret = pcre2_substring_copy_bynumber(
-            de_ctx->class_conf_regex_match, 3, (PCRE2_UCHAR8 *)ct_priority_str, &copylen);
+    ret = pcre_copy_substring((char *)rawstr, ov, 30, 3, ct_priority_str, sizeof(ct_priority_str));
     if (ret < 0) {
-        SCLogInfo("pcre2_substring_copy_bynumber() failed");
+        SCLogInfo("pcre_copy_substring() failed");
         goto error;
     }
     if (StringParseUint32(&ct_priority, 10, 0, (const char *)ct_priority_str) < 0) {
@@ -342,33 +346,25 @@ static int SCClassConfIsLineBlankOrComment(char *line)
  *
  * \param de_ctx Pointer to the Detection Engine Context.
  */
-static bool SCClassConfParseFile(DetectEngineCtx *de_ctx, FILE *fd)
+static void SCClassConfParseFile(DetectEngineCtx *de_ctx, FILE *fd)
 {
     char line[1024];
     uint16_t i = 1;
-    int errors = 0;
 
     while (fgets(line, sizeof(line), fd) != NULL) {
         if (SCClassConfIsLineBlankOrComment(line))
             continue;
 
-        if (SCClassConfAddClasstype(de_ctx, line, i) == -1) {
-            errors++;
-        } else {
-            i++;
-        }
+        SCClassConfAddClasstype(de_ctx, line, i);
+        i++;
     }
 
 #ifdef UNITTESTS
-    if (de_ctx != NULL && strlen(de_ctx->config_prefix) > 0)
-        SCLogInfo("tenant id %d: Added \"%d\" classification types from the classification file",
-                de_ctx->tenant_id, de_ctx->class_conf_ht->count);
-    else
-        SCLogInfo("Added \"%d\" classification types from the classification file",
-                de_ctx->class_conf_ht->count);
+    SCLogInfo("Added \"%d\" classification types from the classification file",
+              de_ctx->class_conf_ht->count);
 #endif
 
-    return errors == 0;
+    return;
 }
 
 /**
@@ -393,17 +389,20 @@ static SCClassConfClasstype *SCClassConfAllocClasstype(uint16_t classtype_id,
     if (classtype == NULL)
         return NULL;
 
-    if ((ct = SCCalloc(1, sizeof(SCClassConfClasstype))) == NULL)
+    if ( (ct = SCMalloc(sizeof(SCClassConfClasstype))) == NULL)
         return NULL;
+    memset(ct, 0, sizeof(SCClassConfClasstype));
 
-    if ((ct->classtype = SCClassConfStringToLowercase(classtype)) == NULL) {
+    if ( (ct->classtype = SCClassConfStringToLowercase(classtype)) == NULL) {
+        SCLogError(SC_ERR_MEM_ALLOC, "Error allocating memory");
+
         SCClassConfDeAllocClasstype(ct);
         return NULL;
     }
 
     if (classtype_desc != NULL &&
         (ct->classtype_desc = SCStrdup(classtype_desc)) == NULL) {
-        SCLogError("Error allocating memory");
+        SCLogError(SC_ERR_MEM_ALLOC, "Error allocating memory");
 
         SCClassConfDeAllocClasstype(ct);
         return NULL;
@@ -432,6 +431,8 @@ static void SCClassConfDeAllocClasstype(SCClassConfClasstype *ct)
 
         SCFree(ct);
     }
+
+    return;
 }
 
 /**
@@ -448,12 +449,12 @@ uint32_t SCClassConfClasstypeHashFunc(HashTable *ht, void *data, uint16_t datale
 {
     SCClassConfClasstype *ct = (SCClassConfClasstype *)data;
     uint32_t hash = 0;
-    size_t i = 0;
+    int i = 0;
 
-    size_t len = strlen(ct->classtype);
+    int len = strlen(ct->classtype);
 
     for (i = 0; i < len; i++)
-        hash += u8_tolower((unsigned char)(ct->classtype)[i]);
+        hash += tolower((unsigned char)(ct->classtype)[i]);
 
     hash = hash % ht->array_size;
 
@@ -478,8 +479,8 @@ char SCClassConfClasstypeHashCompareFunc(void *data1, uint16_t datalen1,
 {
     SCClassConfClasstype *ct1 = (SCClassConfClasstype *)data1;
     SCClassConfClasstype *ct2 = (SCClassConfClasstype *)data2;
-    size_t len1 = 0;
-    size_t len2 = 0;
+    int len1 = 0;
+    int len2 = 0;
 
     if (ct1 == NULL || ct2 == NULL)
         return 0;
@@ -507,6 +508,8 @@ char SCClassConfClasstypeHashCompareFunc(void *data1, uint16_t datalen1,
 void SCClassConfClasstypeHashFree(void *ch)
 {
     SCClassConfDeAllocClasstype(ch);
+
+    return;
 }
 
 /**
@@ -521,30 +524,24 @@ void SCClassConfClasstypeHashFree(void *ch)
  * \param de_ctx Pointer to the Detection Engine Context that should be updated
  *               with Classtype information.
  */
-bool SCClassConfLoadClassificationConfigFile(DetectEngineCtx *de_ctx, FILE *fd)
+void SCClassConfLoadClassficationConfigFile(DetectEngineCtx *de_ctx, FILE *fd)
 {
     fd = SCClassConfInitContextAndLocalResources(de_ctx, fd);
     if (fd == NULL) {
 #ifdef UNITTESTS
-        if (RunmodeIsUnittests()) {
-            return false;
+        if (RunmodeIsUnittests() && fd == NULL) {
+            return;
         }
 #endif
-        SCLogError("please check the \"classification-file\" "
-                   "option in your suricata.yaml file");
-        return false;
+        SCLogError(SC_ERR_OPENING_FILE, "please check the \"classification-file\" "
+                "option in your suricata.yaml file");
+        return;
     }
 
-    bool ret = true;
-    if (!SCClassConfParseFile(de_ctx, fd)) {
-        SCLogWarning("Error loading classification configuration from %s",
-                SCClassConfGetConfFilename(de_ctx));
-        ret = false;
-    }
+    SCClassConfParseFile(de_ctx, fd);
+    SCClassConfDeInitLocalResources(de_ctx, fd);
 
-    SCClassConfDeInitLocalResources(fd);
-
-    return ret;
+    return;
 }
 
 /**
@@ -564,7 +561,7 @@ SCClassConfClasstype *SCClassConfGetClasstype(const char *ct_name,
     char name[strlen(ct_name) + 1];
     size_t s;
     for (s = 0; s < strlen(ct_name); s++)
-        name[s] = u8_tolower((unsigned char)ct_name[s]);
+        name[s] = tolower((unsigned char)ct_name[s]);
     name[s] = '\0';
 
     SCClassConfClasstype ct_lookup = {0, 0, name, NULL };
@@ -593,7 +590,7 @@ FILE *SCClassConfGenerateValidDummyClassConfigFD01(void)
 
     FILE *fd = SCFmemopen((void *)buffer, strlen(buffer), "r");
     if (fd == NULL)
-        SCLogDebug("Error with SCFmemopen() called by Classification Config test code");
+        SCLogDebug("Error with SCFmemopen() called by Classifiation Config test code");
 
     return fd;
 }
@@ -604,7 +601,7 @@ FILE *SCClassConfGenerateValidDummyClassConfigFD01(void)
  *
  * \file_path Pointer to the file_path for the dummy classification file.
  */
-FILE *SCClassConfGenerateInvalidDummyClassConfigFD02(void)
+FILE *SCClassConfGenerateInValidDummyClassConfigFD02(void)
 {
     const char *buffer =
         "config classification: not-suspicious,Not Suspicious Traffic,3\n"
@@ -617,7 +614,7 @@ FILE *SCClassConfGenerateInvalidDummyClassConfigFD02(void)
 
     FILE *fd = SCFmemopen((void *)buffer, strlen(buffer), "r");
     if (fd == NULL)
-        SCLogDebug("Error with SCFmemopen() called by Classification Config test code");
+        SCLogDebug("Error with SCFmemopen() called by Classifiation Config test code");
 
     return fd;
 }
@@ -628,7 +625,7 @@ FILE *SCClassConfGenerateInvalidDummyClassConfigFD02(void)
  *
  * \file_path Pointer to the file_path for the dummy classification file.
  */
-FILE *SCClassConfGenerateInvalidDummyClassConfigFD03(void)
+FILE *SCClassConfGenerateInValidDummyClassConfigFD03(void)
 {
     const char *buffer =
         "conig classification: not-suspicious,Not Suspicious Traffic,3\n"
@@ -638,7 +635,7 @@ FILE *SCClassConfGenerateInvalidDummyClassConfigFD03(void)
 
     FILE *fd = SCFmemopen((void *)buffer, strlen(buffer), "r");
     if (fd == NULL)
-        SCLogDebug("Error with SCFmemopen() called by Classification Config test code");
+        SCLogDebug("Error with SCFmemopen() called by Classifiation Config test code");
 
     return fd;
 }
@@ -656,7 +653,7 @@ static int SCClassConfTest01(void)
         return result;
 
     FILE *fd = SCClassConfGenerateValidDummyClassConfigFD01();
-    SCClassConfLoadClassificationConfigFile(de_ctx, fd);
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
 
     if (de_ctx->class_conf_ht == NULL)
         return result;
@@ -681,8 +678,8 @@ static int SCClassConfTest02(void)
     if (de_ctx == NULL)
         return result;
 
-    FILE *fd = SCClassConfGenerateInvalidDummyClassConfigFD03();
-    SCClassConfLoadClassificationConfigFile(de_ctx, fd);
+    FILE *fd = SCClassConfGenerateInValidDummyClassConfigFD03();
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
 
     if (de_ctx->class_conf_ht == NULL)
         return result;
@@ -696,20 +693,27 @@ static int SCClassConfTest02(void)
 
 /**
  * \test Check that only valid classtypes are loaded into the hash table from
- *       the classification.config file.
+ *       the classfication.config file.
  */
 static int SCClassConfTest03(void)
 {
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
+    int result = 0;
 
-    FAIL_IF_NULL(de_ctx);
+    if (de_ctx == NULL)
+        return result;
 
-    FILE *fd = SCClassConfGenerateInvalidDummyClassConfigFD02();
-    FAIL_IF(SCClassConfLoadClassificationConfigFile(de_ctx, fd));
+    FILE *fd = SCClassConfGenerateInValidDummyClassConfigFD02();
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
+
+    if (de_ctx->class_conf_ht == NULL)
+        return result;
+
+    result = (de_ctx->class_conf_ht->count == 3);
 
     DetectEngineCtxFree(de_ctx);
 
-    PASS;
+    return result;
 }
 
 /**
@@ -725,7 +729,7 @@ static int SCClassConfTest04(void)
         return 0;
 
     FILE *fd = SCClassConfGenerateValidDummyClassConfigFD01();
-    SCClassConfLoadClassificationConfigFile(de_ctx, fd);
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
 
     if (de_ctx->class_conf_ht == NULL)
         return 0;
@@ -757,8 +761,8 @@ static int SCClassConfTest05(void)
     if (de_ctx == NULL)
         return 0;
 
-    FILE *fd = SCClassConfGenerateInvalidDummyClassConfigFD03();
-    SCClassConfLoadClassificationConfigFile(de_ctx, fd);
+    FILE *fd = SCClassConfGenerateInValidDummyClassConfigFD03();
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
 
     if (de_ctx->class_conf_ht == NULL)
         return 0;
@@ -778,6 +782,38 @@ static int SCClassConfTest05(void)
 }
 
 /**
+ * \test Check if the classtype info from the classification.config file have
+ *       been loaded into the hash table.
+ */
+static int SCClassConfTest06(void)
+{
+    DetectEngineCtx *de_ctx = DetectEngineCtxInit();
+    int result = 1;
+
+    if (de_ctx == NULL)
+        return 0;
+
+    FILE *fd = SCClassConfGenerateInValidDummyClassConfigFD02();
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
+
+    if (de_ctx->class_conf_ht == NULL)
+        return 0;
+
+    result = (de_ctx->class_conf_ht->count == 3);
+
+    result &= (SCClassConfGetClasstype("unknown", de_ctx) == NULL);
+    result &= (SCClassConfGetClasstype("not-suspicious", de_ctx) != NULL);
+    result &= (SCClassConfGetClasstype("bamboola1", de_ctx) != NULL);
+    result &= (SCClassConfGetClasstype("bamboola1", de_ctx) != NULL);
+    result &= (SCClassConfGetClasstype("BAMBOolA1", de_ctx) != NULL);
+    result &= (SCClassConfGetClasstype("unkNOwn", de_ctx) == NULL);
+
+    DetectEngineCtxFree(de_ctx);
+
+    return result;
+}
+
+/**
  * \brief This function registers unit tests for Classification Config API.
  */
 void SCClassConfRegisterTests(void)
@@ -787,5 +823,6 @@ void SCClassConfRegisterTests(void)
     UtRegisterTest("SCClassConfTest03", SCClassConfTest03);
     UtRegisterTest("SCClassConfTest04", SCClassConfTest04);
     UtRegisterTest("SCClassConfTest05", SCClassConfTest05);
+    UtRegisterTest("SCClassConfTest06", SCClassConfTest06);
 }
 #endif /* UNITTESTS */

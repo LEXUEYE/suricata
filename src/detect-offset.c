@@ -54,57 +54,59 @@ void DetectOffsetRegister (void)
 int DetectOffsetSetup (DetectEngineCtx *de_ctx, Signature *s, const char *offsetstr)
 {
     const char *str = offsetstr;
+    SigMatch *pm = NULL;
+    int ret = -1;
 
-    /* retrieve the sm to apply the offset against */
-    SigMatch *pm = DetectGetLastSMFromLists(s, DETECT_CONTENT, -1);
+    /* retrive the sm to apply the offset against */
+    pm = DetectGetLastSMFromLists(s, DETECT_CONTENT, -1);
     if (pm == NULL) {
-        SCLogError("offset needs preceding content option.");
-        return -1;
+        SCLogError(SC_ERR_OFFSET_MISSING_CONTENT, "offset needs "
+                   "preceding content option.");
+        goto end;
     }
 
     /* verify other conditions */
     DetectContentData *cd = (DetectContentData *)pm->ctx;
 
     if (cd->flags & DETECT_CONTENT_STARTS_WITH) {
-        SCLogError("can't use offset with startswith.");
-        return -1;
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't use offset with startswith.");
+        goto end;
     }
     if (cd->flags & DETECT_CONTENT_OFFSET) {
-        SCLogError("can't use multiple offsets for the same content.");
-        return -1;
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't use multiple offsets for the same content.");
+        goto end;
     }
-    if (cd->flags & (DETECT_CONTENT_WITHIN | DETECT_CONTENT_DISTANCE)) {
-        SCLogError("can't use a relative "
+    if ((cd->flags & DETECT_CONTENT_WITHIN) || (cd->flags & DETECT_CONTENT_DISTANCE)) {
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't use a relative "
                    "keyword like within/distance with a absolute "
                    "relative keyword like depth/offset for the same "
-                   "content.");
-        return -1;
+                   "content." );
+        goto end;
     }
     if (cd->flags & DETECT_CONTENT_NEGATED && cd->flags & DETECT_CONTENT_FAST_PATTERN) {
-        SCLogError("can't have a relative "
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't have a relative "
                    "negated keyword set along with 'fast_pattern'.");
-        return -1;
+        goto end;
     }
     if (cd->flags & DETECT_CONTENT_FAST_PATTERN_ONLY) {
-        SCLogError("can't have a relative "
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't have a relative "
                    "keyword set along with 'fast_pattern:only;'.");
-        return -1;
+        goto end;
     }
     if (str[0] != '-' && isalpha((unsigned char)str[0])) {
         DetectByteIndexType index;
-        if (!DetectByteRetrieveSMVar(str, s, -1, &index)) {
-            SCLogError("unknown byte_ keyword var "
-                       "seen in offset - %s.",
-                    str);
-            return -1;
+        if (!DetectByteRetrieveSMVar(str, s, &index)) {
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "unknown byte_ keyword var "
+                       "seen in offset - %s.", str);
+            goto end;
         }
         cd->offset = index;
         cd->flags |= DETECT_CONTENT_OFFSET_VAR;
     } else {
         if (StringParseUint16(&cd->offset, 0, 0, str) < 0)
         {
-            SCLogError("invalid value for offset: %s.", str);
-            return -1;
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "invalid value for offset: %s.", str);
+            goto end;
         }
         if (cd->depth != 0) {
             if (cd->depth < cd->content_len) {
@@ -117,6 +119,9 @@ int DetectOffsetSetup (DetectEngineCtx *de_ctx, Signature *s, const char *offset
         }
     }
     cd->flags |= DETECT_CONTENT_OFFSET;
-    return 0;
+
+    ret = 0;
+ end:
+    return ret;
 }
 

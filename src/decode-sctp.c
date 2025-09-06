@@ -1,4 +1,4 @@
-/* Copyright (C) 2011-2021 Open Information Security Foundation
+/* Copyright (C) 2011 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -34,8 +34,6 @@
 #include "decode.h"
 #include "decode-sctp.h"
 #include "decode-events.h"
-
-#include "util-validate.h"
 #include "util-unittest.h"
 #include "util-debug.h"
 #include "util-optimize.h"
@@ -43,19 +41,21 @@
 
 static int DecodeSCTPPacket(ThreadVars *tv, Packet *p, const uint8_t *pkt, uint16_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
     if (unlikely(len < SCTP_HEADER_LEN)) {
         ENGINE_SET_INVALID_EVENT(p, SCTP_PKT_TOO_SMALL);
         return -1;
     }
 
-    SCTPHdr *sctph = PacketSetSCTP(p, pkt);
-    p->sp = SCNtohs(sctph->sh_sport);
-    p->dp = SCNtohs(sctph->sh_dport);
+    p->sctph = (SCTPHdr *)pkt;
+
+    SET_SCTP_SRC_PORT(p,&p->sp);
+    SET_SCTP_DST_PORT(p,&p->dp);
+
     p->payload = (uint8_t *)pkt + sizeof(SCTPHdr);
     p->payload_len = len - sizeof(SCTPHdr);
+
     p->proto = IPPROTO_SCTP;
+
     return 0;
 }
 
@@ -65,11 +65,14 @@ int DecodeSCTP(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
     StatsIncr(tv, dtv->counter_sctp);
 
     if (unlikely(DecodeSCTPPacket(tv, p,pkt,len) < 0)) {
-        PacketClearL4(p);
+        CLEAR_SCTP_PACKET(p);
         return TM_ECODE_FAILED;
     }
 
-    SCLogDebug("SCTP sp: %u -> dp: %u", p->sp, p->dp);
+#ifdef DEBUG
+    SCLogDebug("SCTP sp: %" PRIu32 " -> dp: %" PRIu32,
+        SCTP_GET_SRC_PORT(p), SCTP_GET_DST_PORT(p));
+#endif
 
     FlowSetupPacket(p);
 

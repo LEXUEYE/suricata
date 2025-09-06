@@ -20,12 +20,12 @@
  *  \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_RUNMODE_IPFW_H
-#define SURICATA_RUNMODE_IPFW_H
+#ifndef __RUNMODE_IPFW_H__
+#define __RUNMODE_IPFW_H__
 
 int RunModeIpsIPFWAutoFp(void);
 int RunModeIpsIPFWWorker(void);
 void RunModeIpsIPFWRegister(void);
 const char *RunModeIpsIPFWGetDefaultMode(void);
 
-#endif /* SURICATA_RUNMODE_IPFW_H */
+#endif /* __RUNMODE_IPFW_H__ */

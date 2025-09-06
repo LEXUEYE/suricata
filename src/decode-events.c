@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2013 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -27,11 +27,6 @@
 /* code moved to app-layer-events */
 
 const struct DecodeEvents_ DEvents[] = {
-    /* CAPTURE EVENTS */
-    {
-            "decoder.afpacket.trunc_pkt",
-            AFP_TRUNC_PKT,
-    },
     /* IPV4 EVENTS */
     {
             "decoder.ipv4.pkt_too_small",
@@ -275,10 +270,6 @@ const struct DecodeEvents_ DEvents[] = {
             "decoder.udp.hlen_invalid",
             UDP_HLEN_INVALID,
     },
-    {
-            "decoder.udp.len_invalid",
-            UDP_LEN_INVALID,
-    },
 
     /* SLL EVENTS */
     {
@@ -286,20 +277,10 @@ const struct DecodeEvents_ DEvents[] = {
             SLL_PKT_TOO_SMALL,
     },
 
-    /* SLL2 EVENTS */
-    {
-            "decoder.sll2.pkt_too_small",
-            SLL2_PKT_TOO_SMALL,
-    },
-
     /* ETHERNET EVENTS */
     {
             "decoder.ethernet.pkt_too_small",
             ETHERNET_PKT_TOO_SMALL,
-    },
-    {
-            "decoder.ethernet.unknown_ethertype",
-            ETHERNET_UNKNOWN_ETHERTYPE,
     },
 
     /* PPP EVENTS */
@@ -454,13 +435,7 @@ const struct DecodeEvents_ DEvents[] = {
             SCTP_PKT_TOO_SMALL,
     },
 
-    /* ESP EVENTS */
-    {
-            "decoder.esp.pkt_too_small",
-            ESP_PKT_TOO_SMALL,
-    },
-
-    /* Fragmentation reassembly events. */
+    /* Fragmentation reasembly events. */
     {
             "decoder.ipv4.frag_pkt_too_large",
             IPV4_FRAG_PKT_TOO_LARGE,
@@ -574,33 +549,6 @@ const struct DecodeEvents_ DEvents[] = {
             CHDLC_PKT_TOO_SMALL,
     },
 
-    /* NSH events */
-    {
-            "decoder.nsh.header_too_small",
-            NSH_HEADER_TOO_SMALL,
-    },
-    {
-            "decoder.nsh.unsupported_version",
-            NSH_UNSUPPORTED_VERSION,
-    },
-    {
-            "decoder.nsh.bad_header_length",
-            NSH_BAD_HEADER_LENGTH,
-    },
-    {
-            "decoder.nsh.reserved_type",
-            NSH_RESERVED_TYPE,
-    },
-    {
-            "decoder.nsh.unsupported_type",
-            NSH_UNSUPPORTED_TYPE,
-    },
-    {
-            "decoder.nsh.unknown_payload",
-            NSH_UNKNOWN_PAYLOAD,
-    },
-
-    /* GENERIC EVENTS */
     {
             "decoder.too_many_layers",
             GENERIC_TOO_MANY_LAYERS,
@@ -644,20 +592,12 @@ const struct DecodeEvents_ DEvents[] = {
             STREAM_3WHS_SYNACK_FLOOD,
     },
     {
-            "stream.3whs_synack_tfo_data_ignored",
-            STREAM_3WHS_SYNACK_TFO_DATA_IGNORED,
-    },
-    {
             "stream.3whs_syn_resend_diff_seq_on_syn_recv",
             STREAM_3WHS_SYN_RESEND_DIFF_SEQ_ON_SYN_RECV,
     },
     {
             "stream.3whs_syn_toclient_on_syn_recv",
             STREAM_3WHS_SYN_TOCLIENT_ON_SYN_RECV,
-    },
-    {
-            "stream.3whs_syn_flood",
-            STREAM_3WHS_SYN_FLOOD,
     },
     {
             "stream.3whs_wrong_seq_wrong_ack",
@@ -748,10 +688,6 @@ const struct DecodeEvents_ DEvents[] = {
             STREAM_EST_INVALID_ACK,
     },
     {
-            "stream.est_ack_zwp_data",
-            STREAM_EST_ACK_ZWP_DATA,
-    },
-    {
             "stream.fin_invalid_ack",
             STREAM_FIN_INVALID_ACK,
     },
@@ -832,16 +768,8 @@ const struct DecodeEvents_ DEvents[] = {
             STREAM_RST_INVALID_ACK,
     },
     {
-            "stream.rst_with_data",
-            STREAM_RST_WITH_DATA,
-    },
-    {
             "stream.pkt_retransmission",
             STREAM_PKT_RETRANSMISSION,
-    },
-    {
-            "stream.pkt_spurious_retransmission",
-            STREAM_PKT_SPURIOUS_RETRANSMISSION,
     },
     {
             "stream.pkt_bad_window_update",
@@ -872,56 +800,6 @@ const struct DecodeEvents_ DEvents[] = {
     {
             "stream.reassembly_overlap_different_data",
             STREAM_REASSEMBLY_OVERLAP_DIFFERENT_DATA,
-    },
-    {
-            "stream.reassembly_depth_reached",
-            STREAM_REASSEMBLY_DEPTH_REACHED,
-    },
-    {
-            "stream.reassembly_insert_memcap",
-            STREAM_REASSEMBLY_INSERT_MEMCAP,
-    },
-    {
-            "stream.reassembly_insert_limit",
-            STREAM_REASSEMBLY_INSERT_LIMIT,
-    },
-    {
-            "stream.reassembly_insert_invalid",
-            STREAM_REASSEMBLY_INSERT_INVALID,
-    },
-    {
-            "stream.reassembly_urgent_oob_limit_reached",
-            STREAM_REASSEMBLY_URGENT_OOB_LIMIT_REACHED,
-    },
-
-    /* ARP EVENTS */
-    {
-            "decoder.arp.pkt_too_small",
-            ARP_PKT_TOO_SMALL,
-    },
-    {
-            "decoder.arp.unsupported_hardware",
-            ARP_UNSUPPORTED_HARDWARE,
-    },
-    {
-            "decoder.arp.unsupported_protocol",
-            ARP_UNSUPPORTED_PROTOCOL,
-    },
-    {
-            "decoder.arp.invalid_pkt",
-            ARP_INVALID_PKT,
-    },
-    {
-            "decoder.arp.invalid_hardware_size",
-            ARP_INVALID_HARDWARE_SIZE,
-    },
-    {
-            "decoder.arp.invalid_protocol_size",
-            ARP_INVALID_PROTOCOL_SIZE,
-    },
-    {
-            "decoder.arp.unsupported_opcode",
-            ARP_UNSUPPORTED_OPCODE,
     },
 
     { NULL, 0 },

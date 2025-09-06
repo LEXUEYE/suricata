@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2024 Open Information Security Foundation
+/* Copyright (C) 2007-2012 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,14 +21,14 @@
  * \author Tom DeCanio <td@npulsetech.com>
  */
 
-#ifndef SURICATA_OUTPUT_JSON_TLS_H
-#define SURICATA_OUTPUT_JSON_TLS_H
+#ifndef __OUTPUT_JSON_TLS_H__
+#define __OUTPUT_JSON_TLS_H__
 
 void JsonTlsLogRegister(void);
 
-/* For SCJsonBuilder. */
-#include "rust.h"
+#include "app-layer-ssl.h"
 
-bool JsonTlsLogJSONExtended(void *vtx, SCJsonBuilder *js);
+void JsonTlsLogJSONBasic(JsonBuilder *js, SSLState *ssl_state);
+void JsonTlsLogJSONExtended(JsonBuilder *js, SSLState *ssl_state);
 
-#endif /* SURICATA_OUTPUT_JSON_TLS_H */
+#endif /* __OUTPUT_JSON_TLS_H__ */

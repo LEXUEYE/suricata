@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2024 Open Information Security Foundation
+/* Copyright (C) 2007-2013 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -25,7 +25,6 @@
 
 #include "suricata-common.h"
 #include "detect.h"
-#include "detect-engine-threshold.h"
 
 #include "util-var.h"
 
@@ -34,7 +33,7 @@
 #include "pkt-var.h"
 #include "host-bit.h"
 #include "ippair-bit.h"
-#include "util-validate.h"
+
 #include "util-debug.h"
 
 void XBitFree(XBit *fb)
@@ -68,10 +67,6 @@ void GenericVarFree(GenericVar *gv)
             XBitFree(fb);
             break;
         }
-        case DETECT_THRESHOLD: {
-            FlowThresholdVarFree(gv);
-            break;
-        }
         case DETECT_FLOWVAR:
         {
             FlowVar *fv = (FlowVar *)gv;
@@ -86,8 +81,7 @@ void GenericVarFree(GenericVar *gv)
         }
         default:
         {
-            SCLogDebug("GenericVarFree unknown type %" PRIu32, gv->type);
-            DEBUG_VALIDATE_BUG_ON(1);
+            printf("ERROR: GenericVarFree unknown type %" PRIu32 "\n", gv->type);
             break;
         }
     }

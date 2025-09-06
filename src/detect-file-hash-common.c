@@ -32,6 +32,8 @@
 
 #include "app-layer-htp.h"
 
+#ifdef HAVE_NSS
+
 /**
  * \brief Read the bytes of a hash from an hexadecimal string
  *
@@ -48,7 +50,8 @@ int ReadHashString(uint8_t *hash, const char *string, const char *filename, int 
         uint16_t expected_len)
 {
     if (strlen(string) != expected_len) {
-        SCLogError("%s:%d hash string not %d characters", filename, line_no, expected_len);
+        SCLogError(SC_ERR_INVALID_HASH, "%s:%d hash string not %d characters",
+                filename, line_no, expected_len);
         return -1;
     }
 
@@ -62,7 +65,8 @@ int ReadHashString(uint8_t *hash, const char *string, const char *filename, int 
         if (value >= 0 && value <= 255)
             hash[x] = (uint8_t)value;
         else {
-            SCLogError("%s:%d hash byte out of range %ld", filename, line_no, value);
+            SCLogError(SC_ERR_INVALID_HASH, "%s:%d hash byte out of range %ld",
+                    filename, line_no, value);
             return -1;
         }
     }
@@ -201,9 +205,11 @@ static DetectFileHashData *DetectFileHashParse (const DetectEngineCtx *de_ctx,
     char *rule_filename = NULL;
 
     /* We have a correct hash algorithm option */
-    filehash = SCCalloc(1, sizeof(DetectFileHashData));
+    filehash = SCMalloc(sizeof(DetectFileHashData));
     if (unlikely(filehash == NULL))
         goto error;
+
+    memset(filehash, 0x00, sizeof(DetectFileHashData));
 
     if (strlen(str) && str[0] == '!') {
         filehash->negated = 1;
@@ -230,8 +236,6 @@ static DetectFileHashData *DetectFileHashParse (const DetectEngineCtx *de_ctx,
         goto error;
     }
 
-    /* de_ctx->rule_file is already set by the rule loader before this
-     * function is called, so it is guaranteed to be non-NULL here. */
     rule_filename = SCStrdup(de_ctx->rule_file);
     if (rule_filename == NULL) {
         goto error;
@@ -241,19 +245,22 @@ static DetectFileHashData *DetectFileHashParse (const DetectEngineCtx *de_ctx,
     fp = fopen(filename, "r");
     if (fp == NULL) {
 #ifdef HAVE_LIBGEN_H
-        char *dir = dirname(rule_filename);
-        if (dir != NULL) {
-            char path[PATH_MAX];
-            snprintf(path, sizeof(path), "%s/%s", dir, str);
-            fp = fopen(path, "r");
-            if (fp == NULL) {
-                SCLogError("opening hash file %s: %s", path, strerror(errno));
-                goto error;
+        if (de_ctx->rule_file != NULL) {
+            char *dir = dirname(rule_filename);
+            if (dir != NULL) {
+                char path[PATH_MAX];
+                snprintf(path, sizeof(path), "%s/%s", dir, str);
+                fp = fopen(path, "r");
+                if (fp == NULL) {
+                    SCLogError(SC_ERR_OPENING_RULE_FILE,
+                            "opening hash file %s: %s", path, strerror(errno));
+                    goto error;
+                }
             }
         }
         if (fp == NULL) {
 #endif
-            SCLogError("opening hash file %s: %s", filename, strerror(errno));
+            SCLogError(SC_ERR_OPENING_RULE_FILE, "opening hash file %s: %s", filename, strerror(errno));
             goto error;
 #ifdef HAVE_LIBGEN_H
         }
@@ -315,10 +322,11 @@ error:
  * \retval 0 on Success
  * \retval -1 on Failure
  */
-int DetectFileHashSetup(
-        DetectEngineCtx *de_ctx, Signature *s, const char *str, uint16_t type, int list)
+int DetectFileHashSetup (DetectEngineCtx *de_ctx, Signature *s, const char *str,
+        uint32_t type, int list)
 {
     DetectFileHashData *filehash = NULL;
+    SigMatch *sm = NULL;
 
     filehash = DetectFileHashParse(de_ctx, str, type);
     if (filehash == NULL)
@@ -326,10 +334,14 @@ int DetectFileHashSetup(
 
     /* Okay so far so good, lets get this into a SigMatch
      * and put it in the Signature. */
-
-    if (SCSigMatchAppendSMToList(de_ctx, s, type, (SigMatchCtx *)filehash, list) == NULL) {
+    sm = SigMatchAlloc();
+    if (sm == NULL)
         goto error;
-    }
+
+    sm->type = type;
+    sm->ctx = (void *)filehash;
+
+    SigMatchAppendSMToList(s, sm, list);
 
     s->file_flags |= FILE_SIG_NEED_FILE;
 
@@ -348,6 +360,8 @@ int DetectFileHashSetup(
 error:
     if (filehash != NULL)
         DetectFileHashFree(de_ctx, filehash);
+    if (sm != NULL)
+        SCFree(sm);
     return -1;
 }
 
@@ -365,3 +379,5 @@ void DetectFileHashFree(DetectEngineCtx *de_ctx, void *ptr)
         SCFree(filehash);
     }
 }
+
+#endif /* HAVE_NSS */

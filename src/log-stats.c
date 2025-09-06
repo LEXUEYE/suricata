@@ -1,4 +1,4 @@
-/* Copyright (C) 2014-2024 Open Information Security Foundation
+/* Copyright (C) 2014 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -23,6 +23,7 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
 #include "detect.h"
 #include "pkt-var.h"
 #include "conf.h"
@@ -89,16 +90,17 @@ static int LogStatsLogger(ThreadVars *tv, void *thread_data, const StatsTable *s
     int days = in_hours / 24;
 
     MemBufferWriteString(aft->buffer, "----------------------------------------------"
-                                      "-----------------------------------------------------\n");
+            "--------------------------------------\n");
     MemBufferWriteString(aft->buffer, "Date: %" PRId32 "/%" PRId32 "/%04d -- "
             "%02d:%02d:%02d (uptime: %"PRId32"d, %02dh %02dm %02ds)\n",
             tms->tm_mon + 1, tms->tm_mday, tms->tm_year + 1900, tms->tm_hour,
             tms->tm_min, tms->tm_sec, days, hours, min, sec);
     MemBufferWriteString(aft->buffer, "----------------------------------------------"
-                                      "-----------------------------------------------------\n");
-    MemBufferWriteString(aft->buffer, "%-60s | %-25s | %-s\n", "Counter", "TM Name", "Value");
+            "--------------------------------------\n");
+    MemBufferWriteString(aft->buffer, "%-45s | %-25s | %-s\n", "Counter", "TM Name",
+            "Value");
     MemBufferWriteString(aft->buffer, "----------------------------------------------"
-                                      "-----------------------------------------------------\n");
+            "--------------------------------------\n");
 
     /* global stats */
     uint32_t u = 0;
@@ -111,7 +113,7 @@ static int LogStatsLogger(ThreadVars *tv, void *thread_data, const StatsTable *s
                 continue;
 
             char line[256];
-            size_t len = snprintf(line, sizeof(line), "%-60s | %-25s | %-" PRIu64 "\n",
+            size_t len = snprintf(line, sizeof(line), "%-45s | %-25s | %-" PRIu64 "\n",
                     st->stats[u].name, st->stats[u].tm_name, st->stats[u].value);
 
             /* since we can have many threads, the buffer might not be big enough.
@@ -140,7 +142,7 @@ static int LogStatsLogger(ThreadVars *tv, void *thread_data, const StatsTable *s
                     continue;
 
                 char line[256];
-                size_t len = snprintf(line, sizeof(line), "%-45s | %-25s | %-" PRIi64 "\n",
+                size_t len = snprintf(line, sizeof(line), "%-45s | %-25s | %-" PRIu64 "\n",
                         st->tstats[u].name, st->tstats[u].tm_name, st->tstats[u].value);
 
                 /* since we can have many threads, the buffer might not be big enough.
@@ -164,9 +166,10 @@ static int LogStatsLogger(ThreadVars *tv, void *thread_data, const StatsTable *s
 
 TmEcode LogStatsLogThreadInit(ThreadVars *t, const void *initdata, void **data)
 {
-    LogStatsLogThread *aft = SCCalloc(1, sizeof(LogStatsLogThread));
+    LogStatsLogThread *aft = SCMalloc(sizeof(LogStatsLogThread));
     if (unlikely(aft == NULL))
         return TM_ECODE_FAILED;
+    memset(aft, 0, sizeof(LogStatsLogThread));
 
     if(initdata == NULL)
     {
@@ -181,7 +184,7 @@ TmEcode LogStatsLogThreadInit(ThreadVars *t, const void *initdata, void **data)
         return TM_ECODE_FAILED;
     }
 
-    /* Use the Output Context (file pointer and mutex) */
+    /* Use the Ouptut Context (file pointer and mutex) */
     aft->statslog_ctx= ((OutputCtx *)initdata)->data;
 
     *data = (void *)aft;
@@ -205,14 +208,14 @@ TmEcode LogStatsLogThreadDeinit(ThreadVars *t, void *data)
 
 /** \brief Create a new http log LogFileCtx.
  *  \param conf Pointer to ConfNode containing this loggers configuration.
- *  \return NULL if failure, LogFileCtx* to the file_ctx if successful
+ *  \return NULL if failure, LogFileCtx* to the file_ctx if succesful
  * */
-static OutputInitResult LogStatsLogInitCtx(SCConfNode *conf)
+static OutputInitResult LogStatsLogInitCtx(ConfNode *conf)
 {
     OutputInitResult result = { NULL, false };
     LogFileCtx *file_ctx = LogFileNewCtx();
     if (file_ctx == NULL) {
-        SCLogError("couldn't create new file_ctx");
+        SCLogError(SC_ERR_STATS_LOG_GENERIC, "couldn't create new file_ctx");
         return result;
     }
 
@@ -221,35 +224,37 @@ static OutputInitResult LogStatsLogInitCtx(SCConfNode *conf)
         return result;
     }
 
-    LogStatsFileCtx *statslog_ctx = SCCalloc(1, sizeof(LogStatsFileCtx));
+    LogStatsFileCtx *statslog_ctx = SCMalloc(sizeof(LogStatsFileCtx));
     if (unlikely(statslog_ctx == NULL)) {
         LogFileFreeCtx(file_ctx);
         return result;
     }
+    memset(statslog_ctx, 0x00, sizeof(LogStatsFileCtx));
 
     statslog_ctx->flags = LOG_STATS_TOTALS;
 
     if (conf != NULL) {
-        const char *totals = SCConfNodeLookupChildValue(conf, "totals");
-        const char *threads = SCConfNodeLookupChildValue(conf, "threads");
-        const char *nulls = SCConfNodeLookupChildValue(conf, "null-values");
+        const char *totals = ConfNodeLookupChildValue(conf, "totals");
+        const char *threads = ConfNodeLookupChildValue(conf, "threads");
+        const char *nulls = ConfNodeLookupChildValue(conf, "null-values");
         SCLogDebug("totals %s threads %s", totals, threads);
 
-        if ((totals != NULL && SCConfValIsFalse(totals)) &&
-                (threads != NULL && SCConfValIsFalse(threads))) {
+        if ((totals != NULL && ConfValIsFalse(totals)) &&
+                (threads != NULL && ConfValIsFalse(threads))) {
             LogFileFreeCtx(file_ctx);
             SCFree(statslog_ctx);
-            SCLogError("Cannot disable both totals and threads in stats logging");
+            SCLogError(SC_ERR_STATS_LOG_NEGATED,
+                    "Cannot disable both totals and threads in stats logging");
             return result;
         }
 
-        if (totals != NULL && SCConfValIsFalse(totals)) {
+        if (totals != NULL && ConfValIsFalse(totals)) {
             statslog_ctx->flags &= ~LOG_STATS_TOTALS;
         }
-        if (threads != NULL && SCConfValIsTrue(threads)) {
+        if (threads != NULL && ConfValIsTrue(threads)) {
             statslog_ctx->flags |= LOG_STATS_THREADS;
         }
-        if (nulls != NULL && SCConfValIsTrue(nulls)) {
+        if (nulls != NULL && ConfValIsTrue(nulls)) {
             statslog_ctx->flags |= LOG_STATS_NULLS;
         }
         SCLogDebug("statslog_ctx->flags %08x", statslog_ctx->flags);
@@ -284,6 +289,7 @@ static void LogStatsLogDeInitCtx(OutputCtx *output_ctx)
 
 void LogStatsLogRegister (void)
 {
-    OutputRegisterStatsModule(LOGGER_STATS, MODULE_NAME, "stats", LogStatsLogInitCtx,
-            LogStatsLogger, LogStatsLogThreadInit, LogStatsLogThreadDeinit);
+    OutputRegisterStatsModule(LOGGER_STATS, MODULE_NAME, "stats",
+        LogStatsLogInitCtx, LogStatsLogger, LogStatsLogThreadInit,
+        LogStatsLogThreadDeinit, NULL);
 }

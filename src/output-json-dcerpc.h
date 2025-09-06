@@ -15,9 +15,9 @@
  * 02110-1301, USA.
  */
 
-#ifndef SURICATA_OUTPUT_JSON_DCERPC_H
-#define SURICATA_OUTPUT_JSON_DCERPC_H
+#ifndef __OUTPUT_JSON_DCERPC_H__
+#define __OUTPUT_JSON_DCERPC_H__
 
 void JsonDCERPCLogRegister(void);
 
-#endif /* SURICATA_OUTPUT_JSON_DCERPC_H */
+#endif /* __OUTPUT_JSON_DCERPC_H__ */

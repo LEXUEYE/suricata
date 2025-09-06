@@ -1,4 +1,4 @@
-const char *configNoChecksum = "\
+const char configNoChecksum[] = "\
 %YAML 1.1\n\
 ---\n\
 pcap-file:\n\
@@ -8,7 +8,6 @@ pcap-file:\n\
 stream:\n\
 \n\
   checksum-validation: no\n\
-  midstream: true\n\
 outputs:\n\
   - fast:\n\
       enabled: yes\n\
@@ -54,7 +53,7 @@ outputs:\n\
         - nfs\n\
         - smb\n\
         - tftp\n\
-        - ike\n\
+        - ikev2\n\
         - krb5\n\
         - snmp\n\
         - rfb\n\
@@ -63,7 +62,6 @@ outputs:\n\
             enabled: yes\n\
             extended: yes\n\
         - ssh\n\
-        - pgsql\n\
         - flow\n\
         - netflow\n\
         - metadata\n\
@@ -75,15 +73,9 @@ outputs:\n\
       enabled: yes\n\
       filename: /dev/null\n\
       extended: yes\n\
-  - file-store:\n\
-      version: 2\n\
-      enabled: yes\n\
-      force-filestore: yes\n\
 app-layer:\n\
   protocols:\n\
     rdp:\n\
-      enabled: yes\n\
-    template:\n\
       enabled: yes\n\
     modbus:\n\
       enabled: yes\n\
@@ -97,6 +89,7 @@ app-layer:\n\
       enabled: yes\n\
       detection-ports:\n\
         dp: 44818\n\
+        sp: 44818\n\
     sip:\n\
       enabled: yes\n\
     ssh:\n\
@@ -104,16 +97,6 @@ app-layer:\n\
       hassh: yes\n\
     mqtt:\n\
       enabled: yes\n\
-    pgsql:\n\
-      enabled: yes\n\
     http2:\n\
       enabled: yes\n\
-    quic:\n\
-      enabled: yes\n\
-detect:\n\
-  inspection-recursion-limit: 0\n\
-datasets:\n\
-  maximums:\n\
-    single_hashsize: 65536\n\
-    total_hashsizes: 16777216\n\
 ";

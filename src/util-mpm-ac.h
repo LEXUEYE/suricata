@@ -22,10 +22,8 @@
  *
  */
 
-#ifndef SURICATA_UTIL_MPM_AC__H
-#define SURICATA_UTIL_MPM_AC__H
-
-#include "util-mpm.h"
+#ifndef __UTIL_MPM_AC__H__
+#define __UTIL_MPM_AC__H__
 
 #define SC_AC_STATE_TYPE_U16 uint16_t
 #define SC_AC_STATE_TYPE_U32 uint32_t
@@ -36,8 +34,6 @@ typedef struct SCACPatternList_ {
 
     uint16_t offset;
     uint16_t depth;
-
-    bool endswith;
 
     /* sid(s) for this pattern */
     uint32_t sids_size;
@@ -79,6 +75,13 @@ typedef struct SCACCtx_ {
 
 } SCACCtx;
 
+typedef struct SCACThreadCtx_ {
+    /* the total calls we make to the search function */
+    uint32_t total_calls;
+    /* the total patterns that we ended up matching against */
+    uint64_t total_matches;
+} SCACThreadCtx;
+
 void MpmACRegister(void);
 
-#endif /* SURICATA_UTIL_MPM_AC__H */
+#endif /* __UTIL_MPM_AC__H__ */

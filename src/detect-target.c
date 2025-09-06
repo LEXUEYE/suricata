@@ -76,53 +76,48 @@ void DetectTargetRegister(void) {
  *
  * \param targetstr Pointer to the user provided target options
  *
- * \retval 0 on Success
- * \retval -1 on Failure
+ * \retval targetd pointer to DetectTargetData on success
+ * \retval NULL on failure
  */
 static int DetectTargetParse(Signature *s, const char *targetstr)
 {
-    size_t pcre2len;
+    int ret = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
     char value[10];
 
-    pcre2_match_data *match = NULL;
-    int ret = DetectParsePcreExec(&parse_regex, &match, targetstr, 0, 0);
+    ret = DetectParsePcreExec(&parse_regex, targetstr, 0, 0, ov, MAX_SUBSTRINGS);
     if (ret < 1) {
-        SCLogError("pcre_exec parse error, ret %" PRId32 ", string %s", ret, targetstr);
-        goto error;
+        SCLogError(SC_ERR_PCRE_MATCH, "pcre_exec parse error, ret %" PRId32 ", string %s", ret, targetstr);
+        return -1;
     }
 
-    pcre2len = sizeof(value);
-    int res = pcre2_substring_copy_bynumber(match, 1, (PCRE2_UCHAR8 *)value, &pcre2len);
+    res = pcre_copy_substring(targetstr, ov, MAX_SUBSTRINGS, 1,
+                              value, sizeof(value));
     if (res < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
-        goto error;
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+        return -1;
     }
 
     /* now check key value */
     if (!strcmp(value, "src_ip")) {
         if (s->flags & SIG_FLAG_DEST_IS_TARGET) {
-            SCLogError("Conflicting values of target keyword");
-            goto error;
+            SCLogError(SC_ERR_CONFLICTING_RULE_KEYWORDS,
+                       "Conflicting values of target keyword");
+            return -1;
         }
         s->flags |= SIG_FLAG_SRC_IS_TARGET;
     } else if (!strcmp(value, "dest_ip")) {
         if (s->flags & SIG_FLAG_SRC_IS_TARGET) {
-            SCLogError("Conflicting values of target keyword");
-            goto error;
+            SCLogError(SC_ERR_CONFLICTING_RULE_KEYWORDS,
+                       "Conflicting values of target keyword");
+            return -1;
         }
         s->flags |= SIG_FLAG_DEST_IS_TARGET;
     } else {
-        SCLogError("only 'src_ip' and 'dest_ip' are supported as target value");
-        goto error;
+        SCLogError(SC_ERR_INVALID_VALUE, "only 'src_ip' and 'dest_ip' are supported as target value");
+        return -1;
     }
-    pcre2_match_data_free(match);
     return 0;
-
-error:
-    if (match) {
-        pcre2_match_data_free(match);
-    }
-    return -1;
 }
 
 /**

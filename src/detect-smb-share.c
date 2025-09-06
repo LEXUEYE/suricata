@@ -28,7 +28,6 @@
 #include "detect-parse.h"
 
 #include "detect-engine.h"
-#include "detect-engine-buffer.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-state.h"
 #include "detect-engine-prefilter.h"
@@ -46,10 +45,10 @@ static int g_smb_named_pipe_buffer_id = 0;
 
 static int DetectSmbNamedPipeSetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
 {
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_smb_named_pipe_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_smb_named_pipe_buffer_id) < 0)
         return -1;
 
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_SMB) < 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_SMB) < 0)
         return -1;
 
     return 0;
@@ -65,12 +64,13 @@ static InspectionBuffer *GetNamedPipeData(DetectEngineThreadCtx *det_ctx,
         uint32_t b_len = 0;
         const uint8_t *b = NULL;
 
-        if (SCSmbTxGetNamedPipe(txv, &b, &b_len) != 1)
+        if (rs_smb_tx_get_named_pipe(txv, &b, &b_len) != 1)
             return NULL;
         if (b == NULL || b_len == 0)
             return NULL;
 
-        InspectionBufferSetupAndApplyTransforms(det_ctx, list_id, buffer, b, b_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, b, b_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
     return buffer;
 }
@@ -82,12 +82,13 @@ void DetectSmbNamedPipeRegister(void)
     sigmatch_table[KEYWORD_ID].Setup = DetectSmbNamedPipeSetup;
     sigmatch_table[KEYWORD_ID].flags |= SIGMATCH_NOOPT|SIGMATCH_INFO_STICKY_BUFFER;
     sigmatch_table[KEYWORD_ID].desc = "sticky buffer to match on SMB named pipe in tree connect";
-    sigmatch_table[KEYWORD_ID].url = "/rules/smb-keywords.html#smb-named-pipe";
 
-    DetectAppLayerMpmRegister(BUFFER_NAME, SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
-            GetNamedPipeData, ALPROTO_SMB, 1);
+    DetectAppLayerMpmRegister2(BUFFER_NAME, SIG_FLAG_TOSERVER, 2,
+            PrefilterGenericMpmRegister, GetNamedPipeData,
+            ALPROTO_SMB, 1);
 
-    DetectAppLayerInspectEngineRegister(BUFFER_NAME, ALPROTO_SMB, SIG_FLAG_TOSERVER, 0,
+    DetectAppLayerInspectEngineRegister2(BUFFER_NAME,
+            ALPROTO_SMB, SIG_FLAG_TOSERVER, 0,
             DetectEngineInspectBufferGeneric, GetNamedPipeData);
 
     g_smb_named_pipe_buffer_id = DetectBufferTypeGetByName(BUFFER_NAME);
@@ -107,10 +108,10 @@ static int g_smb_share_buffer_id = 0;
 
 static int DetectSmbShareSetup(DetectEngineCtx *de_ctx, Signature *s, const char *arg)
 {
-    if (SCDetectBufferSetActiveList(de_ctx, s, g_smb_share_buffer_id) < 0)
+    if (DetectBufferSetActiveList(s, g_smb_share_buffer_id) < 0)
         return -1;
 
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_SMB) < 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_SMB) < 0)
         return -1;
 
     return 0;
@@ -126,12 +127,13 @@ static InspectionBuffer *GetShareData(DetectEngineThreadCtx *det_ctx,
         uint32_t b_len = 0;
         const uint8_t *b = NULL;
 
-        if (SCSmbTxGetShare(txv, &b, &b_len) != 1)
+        if (rs_smb_tx_get_share(txv, &b, &b_len) != 1)
             return NULL;
         if (b == NULL || b_len == 0)
             return NULL;
 
-        InspectionBufferSetupAndApplyTransforms(det_ctx, list_id, buffer, b, b_len, transforms);
+        InspectionBufferSetup(det_ctx, list_id, buffer, b, b_len);
+        InspectionBufferApplyTransforms(buffer, transforms);
     }
     return buffer;
 }
@@ -143,12 +145,13 @@ void DetectSmbShareRegister(void)
     sigmatch_table[KEYWORD_ID].Setup = DetectSmbShareSetup;
     sigmatch_table[KEYWORD_ID].flags |= SIGMATCH_NOOPT|SIGMATCH_INFO_STICKY_BUFFER;
     sigmatch_table[KEYWORD_ID].desc = "sticky buffer to match on SMB share name in tree connect";
-    sigmatch_table[KEYWORD_ID].url = "/rules/smb-keywords.html#smb-share";
 
-    DetectAppLayerMpmRegister(BUFFER_NAME, SIG_FLAG_TOSERVER, 2, PrefilterGenericMpmRegister,
-            GetShareData, ALPROTO_SMB, 1);
+    DetectAppLayerMpmRegister2(BUFFER_NAME, SIG_FLAG_TOSERVER, 2,
+            PrefilterGenericMpmRegister, GetShareData,
+            ALPROTO_SMB, 1);
 
-    DetectAppLayerInspectEngineRegister(BUFFER_NAME, ALPROTO_SMB, SIG_FLAG_TOSERVER, 0,
+    DetectAppLayerInspectEngineRegister2(BUFFER_NAME,
+            ALPROTO_SMB, SIG_FLAG_TOSERVER, 0,
             DetectEngineInspectBufferGeneric, GetShareData);
 
     g_smb_share_buffer_id = DetectBufferTypeGetByName(BUFFER_NAME);

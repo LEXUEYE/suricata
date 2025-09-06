@@ -15,8 +15,6 @@
  * 02110-1301, USA.
  */
 
-//! TFTP parser, logger and application layer module.
-
 // written by Clément Galland <clement.galland@epita.fr>
 
 pub mod tftp;

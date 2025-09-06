@@ -15,8 +15,8 @@
  * 02110-1301, USA.
  */
 
-#ifndef SURICATA_DETECT_ENGINE_BUILD_H
-#define SURICATA_DETECT_ENGINE_BUILD_H
+#ifndef __DETECT_ENGINE_BUILD_H__
+#define __DETECT_ENGINE_BUILD_H__
 
 void PacketCreateMask(Packet *p, SignatureMask *mask, AppProto alproto,
         bool app_decoder_events);
@@ -26,12 +26,13 @@ int SignatureIsFilemagicInspecting(const Signature *);
 int SignatureIsFileMd5Inspecting(const Signature *);
 int SignatureIsFileSha1Inspecting(const Signature *s);
 int SignatureIsFileSha256Inspecting(const Signature *s);
+int SignatureIsFilesizeInspecting(const Signature *);
 void SignatureSetType(DetectEngineCtx *de_ctx, Signature *s);
 
-int SigPrepareStage1(DetectEngineCtx *de_ctx);
-int SigPrepareStage2(DetectEngineCtx *de_ctx);
-int SigPrepareStage3(DetectEngineCtx *de_ctx);
-int SigPrepareStage4(DetectEngineCtx *de_ctx);
+int SigAddressPrepareStage1(DetectEngineCtx *de_ctx);
+int SigAddressPrepareStage2(DetectEngineCtx *de_ctx);
+int SigAddressPrepareStage3(DetectEngineCtx *de_ctx);
+int SigAddressPrepareStage4(DetectEngineCtx *de_ctx);
 int SigAddressCleanupStage1(DetectEngineCtx *de_ctx);
 
 void SigCleanSignatures(DetectEngineCtx *);
@@ -39,4 +40,4 @@ void SigCleanSignatures(DetectEngineCtx *);
 int SigGroupBuild(DetectEngineCtx *);
 int SigGroupCleanup (DetectEngineCtx *de_ctx);
 
-#endif /* SURICATA_DETECT_ENGINE_BUILD_H */
+#endif /* __DETECT_ENGINE_BUILD_H__ */

@@ -25,7 +25,6 @@
 
 #include "suricata-common.h"
 #include "decode.h"
-#include "action-globals.h"
 #include "detect.h"
 #include "threads.h"
 #include "flow.h"
@@ -43,13 +42,10 @@
 #include "detect-engine.h"
 #include "detect-engine-mpm.h"
 #include "detect-engine-state.h"
-#include "detect-engine-build.h"
 
 #include "flow-bit.h"
 #include "host-bit.h"
 #include "ippair-bit.h"
-#include "tx-bit.h"
-
 #include "util-var-name.h"
 #include "util-unittest.h"
 #include "util-debug.h"
@@ -61,8 +57,6 @@
 #define PARSE_REGEX     "^([a-z]+)" "(?:,\\s*([^,]+))?" "(?:,\\s*(?:track\\s+([^,]+)))" "(?:,\\s*(?:expire\\s+([^,]+)))?"
 static DetectParseRegex parse_regex;
 
-static int DetectXbitTxMatch(DetectEngineThreadCtx *det_ctx, Flow *f, uint8_t flags, void *state,
-        void *txv, const Signature *s, const SigMatchCtx *ctx);
 static int DetectXbitMatch (DetectEngineThreadCtx *, Packet *, const Signature *, const SigMatchCtx *);
 static int DetectXbitSetup (DetectEngineCtx *, Signature *, const char *);
 #ifdef UNITTESTS
@@ -75,7 +69,6 @@ void DetectXbitsRegister (void)
     sigmatch_table[DETECT_XBITS].name = "xbits";
     sigmatch_table[DETECT_XBITS].desc = "operate on bits";
     sigmatch_table[DETECT_XBITS].url = "/rules/xbits.html";
-    sigmatch_table[DETECT_XBITS].AppLayerTxMatch = DetectXbitTxMatch;
     sigmatch_table[DETECT_XBITS].Match = DetectXbitMatch;
     sigmatch_table[DETECT_XBITS].Setup = DetectXbitSetup;
     sigmatch_table[DETECT_XBITS].Free  = DetectXbitFree;
@@ -83,7 +76,7 @@ void DetectXbitsRegister (void)
     sigmatch_table[DETECT_XBITS].RegisterTests = XBitsRegisterTests;
 #endif
     /* this is compatible to ip-only signatures */
-    sigmatch_table[DETECT_XBITS].flags |= (SIGMATCH_IPONLY_COMPAT | SIGMATCH_SUPPORT_FIREWALL);
+    sigmatch_table[DETECT_XBITS].flags |= SIGMATCH_IPONLY_COMPAT;
 
     DetectSetupParseRegexes(PARSE_REGEX, &parse_regex);
 }
@@ -94,7 +87,7 @@ static int DetectIPPairbitMatchToggle (Packet *p, const DetectXbitsData *fd)
     if (pair == NULL)
         return 0;
 
-    IPPairBitToggle(pair, fd->idx, SCTIME_ADD_SECS(p->ts, fd->expire));
+    IPPairBitToggle(pair,fd->idx,p->ts.tv_sec + fd->expire);
     IPPairRelease(pair);
     return 1;
 }
@@ -117,7 +110,7 @@ static int DetectIPPairbitMatchSet (Packet *p, const DetectXbitsData *fd)
     if (pair == NULL)
         return 0;
 
-    IPPairBitSet(pair, fd->idx, SCTIME_ADD_SECS(p->ts, fd->expire));
+    IPPairBitSet(pair, fd->idx, p->ts.tv_sec + fd->expire);
     IPPairRelease(pair);
     return 1;
 }
@@ -129,7 +122,7 @@ static int DetectIPPairbitMatchIsset (Packet *p, const DetectXbitsData *fd)
     if (pair == NULL)
         return 0;
 
-    r = IPPairBitIsset(pair, fd->idx, p->ts);
+    r = IPPairBitIsset(pair,fd->idx,p->ts.tv_sec);
     IPPairRelease(pair);
     return r;
 }
@@ -141,7 +134,7 @@ static int DetectIPPairbitMatchIsnotset (Packet *p, const DetectXbitsData *fd)
     if (pair == NULL)
         return 1;
 
-    r = IPPairBitIsnotset(pair, fd->idx, p->ts);
+    r = IPPairBitIsnotset(pair,fd->idx,p->ts.tv_sec);
     IPPairRelease(pair);
     return r;
 }
@@ -159,30 +152,11 @@ static int DetectXbitMatchIPPair(Packet *p, const DetectXbitsData *xd)
             return DetectIPPairbitMatchUnset(p,xd);
         case DETECT_XBITS_CMD_TOGGLE:
             return DetectIPPairbitMatchToggle(p,xd);
+        default:
+            SCLogError(SC_ERR_UNKNOWN_VALUE, "unknown cmd %" PRIu32 "", xd->cmd);
+            return 0;
     }
     return 0;
-}
-
-static int DetectXbitPostMatchTx(
-        DetectEngineThreadCtx *det_ctx, Packet *p, const Signature *s, const DetectXbitsData *xd)
-{
-    if (p->flow == NULL)
-        return 0;
-    if (!det_ctx->tx_id_set)
-        return 0;
-    Flow *f = p->flow;
-    void *txv = AppLayerParserGetTx(f->proto, f->alproto, f->alstate, det_ctx->tx_id);
-    if (txv == NULL)
-        return 0;
-    AppLayerTxData *txd = AppLayerParserGetTxData(f->proto, f->alproto, txv);
-
-    if (xd->cmd != DETECT_XBITS_CMD_SET)
-        return 0;
-
-    SCLogDebug("sid %u: post-match SET for bit %u on tx:%" PRIu64 ", txd:%p", s->id, xd->idx,
-            det_ctx->tx_id, txd);
-
-    return TxBitSet(txd, xd->idx);
 }
 
 /*
@@ -204,30 +178,10 @@ static int DetectXbitMatch (DetectEngineThreadCtx *det_ctx, Packet *p, const Sig
         case VAR_TYPE_IPPAIR_BIT:
             return DetectXbitMatchIPPair(p, (const DetectXbitsData *)fd);
             break;
-        case VAR_TYPE_TX_BIT:
-            // TODO this is for PostMatch only. Can we validate somehow?
-            return DetectXbitPostMatchTx(det_ctx, p, s, fd);
-            break;
         default:
             break;
     }
     return 0;
-}
-
-static int DetectXbitTxMatch(DetectEngineThreadCtx *det_ctx, Flow *f, uint8_t flags, void *state,
-        void *txv, const Signature *s, const SigMatchCtx *ctx)
-{
-    const DetectXbitsData *xd = (const DetectXbitsData *)ctx;
-    DEBUG_VALIDATE_BUG_ON(xd == NULL);
-
-    AppLayerTxData *txd = AppLayerParserGetTxData(f->proto, f->alproto, txv);
-
-    SCLogDebug("sid:%u: tx:%" PRIu64 ", txd->txbits:%p", s->id, det_ctx->tx_id, txd->txbits);
-    int r = TxBitIsset(txd, xd->idx);
-    if (r == 1) {
-        return DETECT_ENGINE_INSPECT_SIG_MATCH;
-    }
-    return DETECT_ENGINE_INSPECT_SIG_NO_MATCH;
 }
 
 /** \internal
@@ -242,44 +196,35 @@ static int DetectXbitParse(DetectEngineCtx *de_ctx,
     DetectXbitsData *cd = NULL;
     uint8_t fb_cmd = 0;
     uint8_t hb_dir = 0;
-    size_t pcre2len;
+    int ret = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
     char fb_cmd_str[16] = "", fb_name[256] = "";
     char hb_dir_str[16] = "";
     enum VarTypes var_type = VAR_TYPE_NOT_SET;
     uint32_t expire = DETECT_XBITS_EXPIRE_DEFAULT;
 
-    pcre2_match_data *match = NULL;
-    int ret = DetectParsePcreExec(&parse_regex, &match, rawstr, 0, 0);
+    ret = DetectParsePcreExec(&parse_regex, rawstr,  0, 0, ov, MAX_SUBSTRINGS);
     if (ret != 2 && ret != 3 && ret != 4 && ret != 5) {
-        SCLogError("\"%s\" is not a valid setting for xbits.", rawstr);
-        if (match) {
-            pcre2_match_data_free(match);
-        }
+        SCLogError(SC_ERR_PCRE_MATCH, "\"%s\" is not a valid setting for xbits.", rawstr);
         return -1;
     }
     SCLogDebug("ret %d, %s", ret, rawstr);
-    pcre2len = sizeof(fb_cmd_str);
-    int res = pcre2_substring_copy_bynumber(match, 1, (PCRE2_UCHAR8 *)fb_cmd_str, &pcre2len);
+    res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 1, fb_cmd_str, sizeof(fb_cmd_str));
     if (res < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
-        pcre2_match_data_free(match);
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
         return -1;
     }
 
     if (ret >= 3) {
-        pcre2len = sizeof(fb_name);
-        res = pcre2_substring_copy_bynumber(match, 2, (PCRE2_UCHAR8 *)fb_name, &pcre2len);
+        res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 2, fb_name, sizeof(fb_name));
         if (res < 0) {
-            SCLogError("pcre2_substring_copy_bynumber failed");
-            pcre2_match_data_free(match);
+            SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
             return -1;
         }
         if (ret >= 4) {
-            pcre2len = sizeof(hb_dir_str);
-            res = pcre2_substring_copy_bynumber(match, 3, (PCRE2_UCHAR8 *)hb_dir_str, &pcre2len);
+            res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 3, hb_dir_str, sizeof(hb_dir_str));
             if (res < 0) {
-                SCLogError("pcre2_substring_copy_bynumber failed");
-                pcre2_match_data_free(match);
+                SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
                 return -1;
             }
             SCLogDebug("hb_dir_str %s", hb_dir_str);
@@ -293,37 +238,27 @@ static int DetectXbitParse(DetectEngineCtx *de_ctx,
                 } else if (strcmp(hb_dir_str, "ip_pair") == 0) {
                     hb_dir = DETECT_XBITS_TRACK_IPPAIR;
                     var_type = VAR_TYPE_IPPAIR_BIT;
-                } else if (strcmp(hb_dir_str, "tx") == 0) {
-                    hb_dir = DETECT_XBITS_TRACK_TX;
-                    var_type = VAR_TYPE_TX_BIT;
                 } else {
                     // TODO
-                    pcre2_match_data_free(match);
                     return -1;
                 }
             }
 
             if (ret >= 5) {
                 char expire_str[16] = "";
-                pcre2len = sizeof(expire_str);
-                res = pcre2_substring_copy_bynumber(
-                        match, 4, (PCRE2_UCHAR8 *)expire_str, &pcre2len);
+                res = pcre_copy_substring((char *)rawstr, ov, MAX_SUBSTRINGS, 4, expire_str, sizeof(expire_str));
                 if (res < 0) {
-                    SCLogError("pcre2_substring_copy_bynumber failed");
-                    pcre2_match_data_free(match);
+                    SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
                     return -1;
                 }
                 SCLogDebug("expire_str %s", expire_str);
                 if (StringParseUint32(&expire, 10, 0, (const char *)expire_str) < 0) {
-                    SCLogError("Invalid value for "
-                               "expire: \"%s\"",
-                            expire_str);
-                    pcre2_match_data_free(match);
+                    SCLogError(SC_ERR_INVALID_VALUE, "Invalid value for "
+                               "expire: \"%s\"", expire_str);
                     return -1;
                 }
                 if (expire == 0) {
-                    SCLogError("expire must be bigger than 0");
-                    pcre2_match_data_free(match);
+                    SCLogError(SC_ERR_INVALID_VALUE, "expire must be bigger than 0");
                     return -1;
                 }
                 SCLogDebug("expire %d", expire);
@@ -331,7 +266,6 @@ static int DetectXbitParse(DetectEngineCtx *de_ctx,
         }
     }
 
-    pcre2_match_data_free(match);
     if (strcmp(fb_cmd_str,"noalert") == 0) {
         fb_cmd = DETECT_XBITS_CMD_NOALERT;
     } else if (strcmp(fb_cmd_str,"isset") == 0) {
@@ -345,7 +279,7 @@ static int DetectXbitParse(DetectEngineCtx *de_ctx,
     } else if (strcmp(fb_cmd_str,"toggle") == 0) {
         fb_cmd = DETECT_XBITS_CMD_TOGGLE;
     } else {
-        SCLogError("xbits action \"%s\" is not supported.", fb_cmd_str);
+        SCLogError(SC_ERR_UNKNOWN_VALUE, "xbits action \"%s\" is not supported.", fb_cmd_str);
         return -1;
     }
 
@@ -362,30 +296,24 @@ static int DetectXbitParse(DetectEngineCtx *de_ctx,
         case DETECT_XBITS_CMD_SET:
         case DETECT_XBITS_CMD_UNSET:
         case DETECT_XBITS_CMD_TOGGLE:
+        default:
             if (strlen(fb_name) == 0)
                 return -1;
             break;
-    }
-
-    if (hb_dir == DETECT_XBITS_TRACK_TX) {
-        if (fb_cmd != DETECT_XBITS_CMD_ISSET && fb_cmd != DETECT_XBITS_CMD_SET) {
-            SCLogError("tx xbits only support set and isset");
-            return -1;
-        }
     }
 
     cd = SCMalloc(sizeof(DetectXbitsData));
     if (unlikely(cd == NULL))
         return -1;
 
-    cd->idx = VarNameStoreRegister(fb_name, var_type);
+    cd->idx = VarNameStoreSetupAdd(fb_name, var_type);
     cd->cmd = fb_cmd;
     cd->tracker = hb_dir;
     cd->type = var_type;
     cd->expire = expire;
 
-    SCLogDebug("idx %" PRIu32 ", cmd %s, name %s", cd->idx, fb_cmd_str,
-            strlen(fb_name) ? fb_name : "(none)");
+    SCLogDebug("idx %" PRIu32 ", cmd %s, name %s",
+        cd->idx, fb_cmd_str, strlen(fb_name) ? fb_name : "(none)");
 
     *cdout = cd;
     return 0;
@@ -393,64 +321,50 @@ static int DetectXbitParse(DetectEngineCtx *de_ctx,
 
 int DetectXbitSetup (DetectEngineCtx *de_ctx, Signature *s, const char *rawstr)
 {
+    SigMatch *sm = NULL;
     DetectXbitsData *cd = NULL;
 
     int result = DetectXbitParse(de_ctx, rawstr, &cd);
     if (result < 0) {
         return -1;
-    } else if (cd == NULL) {
-        /* noalert doesn't use a cd/sm struct. It flags the sig. We're done. */
-        s->action &= ~ACTION_ALERT;
+    /* noalert doesn't use a cd/sm struct. It flags the sig. We're done. */
+    } else if (result == 0 && cd == NULL) {
+        s->flags |= SIG_FLAG_NOALERT;
         return 0;
     }
 
     /* Okay so far so good, lets get this into a SigMatch
      * and put it in the Signature. */
+    sm = SigMatchAlloc();
+    if (sm == NULL)
+        goto error;
+
+    sm->type = DETECT_XBITS;
+    sm->ctx = (void *)cd;
+
     switch (cd->cmd) {
         /* case DETECT_XBITS_CMD_NOALERT can't happen here */
+
         case DETECT_XBITS_CMD_ISNOTSET:
-        case DETECT_XBITS_CMD_ISSET: {
-            int list = DETECT_SM_LIST_MATCH;
-            if (cd->tracker == DETECT_XBITS_TRACK_TX) {
-                SCLogDebug("tx xbit isset");
-                if (s->init_data->hook.type != SIGNATURE_HOOK_TYPE_APP) {
-                    SCLogError("tx xbits require an explicit rule hook");
-                    SCFree(cd);
-                    return -1;
-                }
-                list = s->init_data->hook.sm_list;
-                SCLogDebug("setting list %d", list);
-
-                if (list == -1) {
-                    SCLogError("tx xbits failed to set up"); // TODO how would we get here?
-                    SCFree(cd);
-                    return -1;
-                }
-            }
-
-            SCLogDebug("adding match/txmatch");
+        case DETECT_XBITS_CMD_ISSET:
             /* checks, so packet list */
-            if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_XBITS, (SigMatchCtx *)cd, list) ==
-                    NULL) {
-                SCFree(cd);
-                return -1;
-            }
+            SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_MATCH);
             break;
-        }
-        // all other cases
-        // DETECT_XBITS_CMD_SET, DETECT_XBITS_CMD_UNSET, DETECT_XBITS_CMD_TOGGLE:
-        default:
-            SCLogDebug("adding post-match");
+
+        case DETECT_XBITS_CMD_SET:
+        case DETECT_XBITS_CMD_UNSET:
+        case DETECT_XBITS_CMD_TOGGLE:
             /* modifiers, only run when entire sig has matched */
-            if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_XBITS, (SigMatchCtx *)cd,
-                        DETECT_SM_LIST_POSTMATCH) == NULL) {
-                SCFree(cd);
-                return -1;
-            }
+            SigMatchAppendSMToList(s, sm, DETECT_SM_LIST_POSTMATCH);
             break;
     }
 
     return 0;
+
+error:
+    if (cd != NULL)
+        SCFree(cd);
+    return -1;
 }
 
 static void DetectXbitFree (DetectEngineCtx *de_ctx, void *ptr)
@@ -459,7 +373,6 @@ static void DetectXbitFree (DetectEngineCtx *de_ctx, void *ptr)
 
     if (fd == NULL)
         return;
-    VarNameStoreUnregister(fd->idx, fd->type);
 
     SCFree(fd);
 }
@@ -472,8 +385,8 @@ static void XBitsTestSetup(void)
     HostBitInitCtx();
     IPPairBitInitCtx();
     StorageFinalize();
-    HostInitConfig(true);
-    IPPairInitConfig(true);
+    HostInitConfig(TRUE);
+    IPPairInitConfig(TRUE);
 }
 
 static void XBitsTestShutdown(void)
@@ -545,7 +458,7 @@ static int XBitsTestSig01(void)
                     "Host: one.example.org\r\n"
                     "\r\n";
     uint16_t buflen = strlen((char *)buf);
-    Packet *p = PacketGetFromAlloc();
+    Packet *p = SCMalloc(SIZE_OF_PACKET);
     FAIL_IF_NULL(p);
     Signature *s = NULL;
     ThreadVars th_v;
@@ -553,6 +466,7 @@ static int XBitsTestSig01(void)
     DetectEngineCtx *de_ctx = NULL;
 
     memset(&th_v, 0, sizeof(th_v));
+    memset(p, 0, SIZE_OF_PACKET);
     p->src.family = AF_INET;
     p->dst.family = AF_INET;
     p->payload = buf;
@@ -584,7 +498,7 @@ static int XBitsTestSig01(void)
 /**
  * \test various options
  *
- *  \retval 1 on success
+ *  \retval 1 on succces
  *  \retval 0 on failure
  */
 

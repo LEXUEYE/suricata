@@ -21,11 +21,13 @@
  * \author Mats Klepsland <mats.klepsland@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_LUA_SSH_H
-#define SURICATA_UTIL_LUA_SSH_H
+#ifndef __UTIL_LUA_SSH_H__
+#define __UTIL_LUA_SSH_H__
 
-#include "lua.h"
+#ifdef HAVE_LUA
 
-int SCLuaLoadSshLib(lua_State *L);
+int LuaRegisterSshFunctions(lua_State *luastate);
 
-#endif /* SURICATA_UTIL_LUA_SSH_H */
+#endif /* HAVE_LUA */
+
+#endif /* __UTIL_LUA_SSH_H__ */

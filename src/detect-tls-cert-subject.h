@@ -21,9 +21,11 @@
  * \author Mats Klepsland <mats.klepsland@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_TLS_SUBJECT_H
-#define SURICATA_DETECT_TLS_SUBJECT_H
+#ifndef __DETECT_TLS_SUBJECT_H__
+#define __DETECT_TLS_SUBJECT_H__
+
+#include "app-layer-ssl.h"
 
 void DetectTlsSubjectRegister(void);
 
-#endif /* SURICATA_DETECT_TLS_SUBJECT_H */
+#endif /* __DETECT_TLS_SUBJECT_H__ */

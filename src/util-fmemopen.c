@@ -79,7 +79,7 @@ typedef struct SCFmem_ {
 /**
  * \brief Seek the mem file from offset and whence
  * \param handler pointer to the memfile
- * \param offset number of bytes to move from whence
+ * \param osffset number of bytes to move from whence
  * \param whence SEEK_SET, SEEK_CUR, SEEK_END
  * \retval pos the position by the last operation, -1 if sizes are out of bounds
  */
@@ -117,20 +117,20 @@ static fpos_t SeekFn(void *handler, fpos_t offset, int whence)
  */
 static int ReadFn(void *handler, char *buf, int size)
 {
-    int count = 0;
+    size_t count = 0;
     SCFmem *mem = handler;
     size_t available = mem->size - mem->pos;
     int is_eof = 0;
 
     if (size < 0) return - 1;
 
-    if (available < INT_MAX && size > (int)available) {
-        size = (int)available;
+    if ((size_t)size > available) {
+        size = available;
     } else {
         is_eof = 1;
     }
 
-    while (count < size)
+    while (count < (size_t)size)
         buf[count++] = mem->buffer[mem->pos++];
 
     if (is_eof == 1)
@@ -144,20 +144,20 @@ static int ReadFn(void *handler, char *buf, int size)
  * \param handler pointer to the memfile
  * \param buf buffer to write in the handler
  * \param number of bytes to write
- * \retval count , the number of bytes written
+ * \retval count , the number of bytes writen
  */
 static int WriteFn(void *handler, const char *buf, int size)
 {
-    int count = 0;
+    size_t count = 0;
     SCFmem *mem = handler;
     size_t available = mem->size - mem->pos;
 
     if (size < 0) return - 1;
 
-    if (available < INT_MAX && size > (int)available)
-        size = (int)available;
+    if ((size_t)size > available)
+        size = available;
 
-    while (count < size)
+    while (count < (size_t)size)
         mem->buffer[mem->pos++] = buf[count++];
 
     return count;
@@ -183,10 +183,11 @@ static int CloseFn(void *handler)
  */
 FILE *SCFmemopen(void *buf, size_t size, const char *mode)
 {
-    SCFmem *mem = (SCFmem *)SCCalloc(1, sizeof(SCFmem));
+    SCFmem *mem = (SCFmem *) SCMalloc(sizeof(SCFmem));
     if (mem == NULL)
         return NULL;
 
+    memset(mem, 0, sizeof(SCFmem));
     mem->size = size, mem->buffer = buf;
 
     return funopen(mem, ReadFn, WriteFn, SeekFn, CloseFn);

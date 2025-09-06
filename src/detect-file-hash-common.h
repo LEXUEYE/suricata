@@ -23,8 +23,8 @@
  *
  */
 
-#ifndef SURICATA_UTIL_DETECT_FILE_HASH_H
-#define SURICATA_UTIL_DETECT_FILE_HASH_H
+#ifndef __UTIL_DETECT_FILE_HASH_H__
+#define __UTIL_DETECT_FILE_HASH_H__
 
 #include "util-rohash.h"
 
@@ -39,7 +39,7 @@ int LoadHashTable(ROHashTable *, const char *, const char *, int, uint32_t);
 
 int DetectFileHashMatch(DetectEngineThreadCtx *, Flow *, uint8_t,
         File *, const Signature *, const SigMatchCtx *);
-int DetectFileHashSetup(DetectEngineCtx *, Signature *, const char *, uint16_t, int);
+int DetectFileHashSetup(DetectEngineCtx *, Signature *, const char *, uint32_t, int);
 void DetectFileHashFree(DetectEngineCtx *, void *);
 
-#endif /* SURICATA_UTIL_DETECT_FILE_HASH_H */
+#endif /* __UTIL_DETECT_FILE_HASH_H__ */

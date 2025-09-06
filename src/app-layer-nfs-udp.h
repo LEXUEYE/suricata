@@ -21,10 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_APP_LAYER_NFS_UDP_H
-#define SURICATA_APP_LAYER_NFS_UDP_H
+#ifndef __APP_LAYER_NFS_UDP_H__
+#define __APP_LAYER_NFS_UDP_H__
 
 void RegisterNFSUDPParsers(void);
 void NFSUDPParserRegisterTests(void);
 
-#endif /* SURICATA_APP_LAYER_NFS_UDP_H */
+#endif /* __APP_LAYER_NFS_UDP_H__ */

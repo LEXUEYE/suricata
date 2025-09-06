@@ -21,14 +21,14 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_ENGINE_ADDRESS_IPV6_H
-#define SURICATA_DETECT_ENGINE_ADDRESS_IPV6_H
+#ifndef __DETECT_ENGINE_ADDRESS_IPV6_H__
+#define __DETECT_ENGINE_ADDRESS_IPV6_H__
 
-int AddressIPv6Lt(const Address *, const Address *);
-int AddressIPv6Gt(const Address *, const Address *);
-int AddressIPv6Eq(const Address *, const Address *);
-int AddressIPv6Le(const Address *, const Address *);
-int AddressIPv6Ge(const Address *, const Address *);
+int AddressIPv6Lt(Address *, Address *);
+int AddressIPv6Gt(Address *, Address *);
+int AddressIPv6Eq(Address *, Address *);
+int AddressIPv6Le(Address *, Address *);
+int AddressIPv6Ge(Address *, Address *);
 
 int AddressIPv6LeU32(uint32_t *a, uint32_t *b);
 int AddressIPv6LtU32(uint32_t *a, uint32_t *b);
@@ -44,4 +44,5 @@ int DetectAddressCutIPv6(DetectEngineCtx *, DetectAddress *, DetectAddress *,
 
 void DetectAddressIPv6Tests(void);
 
-#endif /* SURICATA_DETECT_ENGINE_ADDRESS_IPV6_H */
+#endif /* __DETECT_ENGINE_ADDRESS_IPV6_H__ */
+

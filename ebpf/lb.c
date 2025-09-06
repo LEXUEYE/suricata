@@ -25,8 +25,7 @@
 #include <linux/ipv6.h>
 #include <linux/filter.h>
 
-#include <bpf/bpf_helpers.h>
-#include "llvm_bpfload.h"
+#include "bpf_helpers.h"
 
 #define LINUX_VERSION_CODE 263682
 

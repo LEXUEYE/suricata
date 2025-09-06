@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_TLS_VERSION_H
-#define SURICATA_DETECT_TLS_VERSION_H
+#ifndef __DETECT_TLS_VERSION_H__
+#define __DETECT_TLS_VERSION_H__
 
 #define DETECT_TLS_VERSION_FLAG_RAW  BIT_U8(0)
 
@@ -34,4 +34,5 @@ typedef struct DetectTlsVersionData_ {
 /* prototypes */
 void DetectTlsVersionRegister (void);
 
-#endif /* SURICATA_DETECT_TLS_VERSION_H */
+#endif /* __DETECT_TLS_VERSION_H__ */
+

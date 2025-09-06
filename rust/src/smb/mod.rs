@@ -15,11 +15,8 @@
  * 02110-1301, USA.
  */
 
-//! SMB application layer, detection, logger and parser module.
-
 pub mod error;
 pub mod smb_records;
-pub mod smb_status;
 pub mod smb1_records;
 pub mod smb2_records;
 pub mod nbss_records;
@@ -42,3 +39,6 @@ pub mod events;
 pub mod auth;
 pub mod files;
 pub mod funcs;
+
+//#[cfg(feature = "lua")]
+//pub mod lua;

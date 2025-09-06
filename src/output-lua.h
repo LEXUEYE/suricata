@@ -21,9 +21,9 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_OUTPUT_LUA_H
-#define SURICATA_OUTPUT_LUA_H
+#ifndef __OUTPUT_LUA_H__
+#define __OUTPUT_LUA_H__
 
 void LuaLogRegister(void);
 
-#endif /* SURICATA_OUTPUT_LUA_H */
+#endif /* __OUTPUT_LUA_H__ */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2013 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -20,32 +20,30 @@
  *  \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_RUNMODES_H
-#define SURICATA_RUNMODES_H
+#ifndef __RUNMODES_H__
+#define __RUNMODES_H__
 
 /* Run mode */
-typedef enum SCRunModes {
+enum RunModes {
     RUNMODE_UNKNOWN = 0,
     RUNMODE_PCAP_DEV,
     RUNMODE_PCAP_FILE,
+    RUNMODE_PFRING,
     RUNMODE_NFQ,
     RUNMODE_NFLOG,
     RUNMODE_IPFW,
     RUNMODE_ERF_FILE,
     RUNMODE_DAG,
     RUNMODE_AFP_DEV,
-    RUNMODE_AFXDP_DEV,
     RUNMODE_NETMAP,
-    RUNMODE_DPDK,
-    RUNMODE_LIB,
     RUNMODE_UNITTEST,
+    RUNMODE_NAPATECH,
     RUNMODE_UNIX_SOCKET,
     RUNMODE_WINDIVERT,
     RUNMODE_PLUGIN,
     RUNMODE_USER_MAX, /* Last standard running mode */
     RUNMODE_LIST_KEYWORDS,
     RUNMODE_LIST_APP_LAYERS,
-    RUNMODE_LIST_APP_LAYER_HOOKS,
     RUNMODE_LIST_RUNMODES,
     RUNMODE_PRINT_VERSION,
     RUNMODE_PRINT_BUILDINFO,
@@ -61,7 +59,7 @@ typedef enum SCRunModes {
 #endif
     RUNMODE_DUMP_FEATURES,
     RUNMODE_MAX,
-} SCRunMode;
+};
 
 /* Run Mode Global Thread Names */
 extern const char *thread_name_autofp;
@@ -75,36 +73,47 @@ extern const char *thread_name_unix_socket;
 extern const char *thread_name_detect_loader;
 extern const char *thread_name_counter_stats;
 extern const char *thread_name_counter_wakeup;
-extern const char *thread_name_heartbeat;
 
 char *RunmodeGetActive(void);
-bool RunmodeIsWorkers(void);
-bool RunmodeIsAutofp(void);
 const char *RunModeGetMainMode(void);
 
 void RunModeListRunmodes(void);
-int RunModeEngineIsIPS(int capture_mode, const char *runmode, const char *capture_plugin_name);
 void RunModeDispatch(int, const char *, const char *capture_plugin_name, const char *capture_plugin_args);
 void RunModeRegisterRunModes(void);
-void RunModeRegisterNewRunMode(SCRunMode, const char *, const char *, int (*RunModeFunc)(void),
-        int (*RunModeIsIPSEnabled)(void));
-void RunModeInitializeThreadSettings(void);
+void RunModeRegisterNewRunMode(enum RunModes, const char *, const char *,
+                               int (*RunModeFunc)(void));
+void RunModeInitialize(void);
 void RunModeInitializeOutputs(void);
 void RunModeShutDown(void);
 
+/* bool indicating if file logger is enabled */
+int RunModeOutputFileEnabled(void);
 /* bool indicating if filedata logger is enabled */
 int RunModeOutputFiledataEnabled(void);
 /** bool indicating if run mode is offline */
-bool IsRunModeOffline(SCRunMode run_mode_to_check);
-bool IsRunModeSystem(SCRunMode run_mode_to_check);
+bool IsRunModeOffline(enum RunModes run_mode_to_check);
+bool IsRunModeSystem(enum RunModes run_mode_to_check);
 
 void RunModeEnablesBypassManager(void);
 int RunModeNeedsBypassManager(void);
 
-extern bool threading_set_cpu_affinity;
+#include "runmode-pcap.h"
+#include "runmode-pcap-file.h"
+#include "runmode-pfring.h"
+#include "runmode-nfq.h"
+#include "runmode-ipfw.h"
+#include "runmode-erf-file.h"
+#include "runmode-erf-dag.h"
+#include "runmode-napatech.h"
+#include "runmode-af-packet.h"
+#include "runmode-nflog.h"
+#include "runmode-unix-socket.h"
+#include "runmode-netmap.h"
+#include "runmode-windivert.h"
+
+extern int threading_set_cpu_affinity;
 extern float threading_detect_ratio;
-extern uint64_t threading_set_stack_size;
 
 extern int debuglog_enabled;
 
-#endif /* SURICATA_RUNMODES_H */
+#endif /* __RUNMODES_H__ */

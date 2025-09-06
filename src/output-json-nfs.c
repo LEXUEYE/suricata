@@ -1,4 +1,4 @@
-/* Copyright (C) 2015-2021 Open Information Security Foundation
+/* Copyright (C) 2015-2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -24,6 +24,7 @@
  */
 
 #include "suricata-common.h"
+#include "debug.h"
 #include "detect.h"
 #include "pkt-var.h"
 #include "conf.h"
@@ -47,25 +48,25 @@
 
 #include "rust.h"
 
-bool EveNFSAddMetadataRPC(const Flow *f, uint64_t tx_id, SCJsonBuilder *jb)
+bool EveNFSAddMetadataRPC(const Flow *f, uint64_t tx_id, JsonBuilder *jb)
 {
     NFSState *state = FlowGetAppState(f);
     if (state) {
         NFSTransaction *tx = AppLayerParserGetTx(f->proto, ALPROTO_NFS, state, tx_id);
         if (tx) {
-            return SCNfsRpcLogJsonResponse(tx, jb);
+            return rs_rpc_log_json_response(tx, jb);
         }
     }
     return false;
 }
 
-bool EveNFSAddMetadata(const Flow *f, uint64_t tx_id, SCJsonBuilder *jb)
+bool EveNFSAddMetadata(const Flow *f, uint64_t tx_id, JsonBuilder *jb)
 {
     NFSState *state = FlowGetAppState(f);
     if (state) {
         NFSTransaction *tx = AppLayerParserGetTx(f->proto, ALPROTO_NFS, state, tx_id);
         if (tx) {
-            return SCNfsLogJsonResponse(state, tx, jb);
+            return rs_nfs_log_json_response(state, tx, jb);
         }
     }
     return false;
@@ -77,40 +78,44 @@ static int JsonNFSLogger(ThreadVars *tv, void *thread_data,
     NFSTransaction *nfstx = tx;
     OutputJsonThreadCtx *thread = thread_data;
 
-    if (SCNfsTxLoggingIsFiltered(state, nfstx))
+    if (rs_nfs_tx_logging_is_filtered(state, nfstx))
         return TM_ECODE_OK;
 
-    SCJsonBuilder *jb = CreateEveHeader(p, LOG_DIR_PACKET, "nfs", NULL, thread->ctx);
+    JsonBuilder *jb = CreateEveHeader(p, LOG_DIR_PACKET, "nfs", NULL);
     if (unlikely(jb == NULL)) {
         return TM_ECODE_OK;
     }
+    EveAddCommonOptions(&thread->ctx->cfg, p, f, jb);
 
-    SCJbOpenObject(jb, "rpc");
-    SCNfsRpcLogJsonResponse(tx, jb);
-    SCJbClose(jb);
+    jb_open_object(jb, "rpc");
+    rs_rpc_log_json_response(tx, jb);
+    jb_close(jb);
 
-    SCJbOpenObject(jb, "nfs");
-    SCNfsLogJsonResponse(state, tx, jb);
-    SCJbClose(jb);
+    jb_open_object(jb, "nfs");
+    rs_nfs_log_json_response(state, tx, jb);
+    jb_close(jb);
 
     MemBufferReset(thread->buffer);
-    OutputJsonBuilderBuffer(tv, p, p->flow, jb, thread);
-    SCJbFree(jb);
+    OutputJsonBuilderBuffer(jb, thread->file_ctx, &thread->buffer);
+    jb_free(jb);
     return TM_ECODE_OK;
 }
 
-static OutputInitResult NFSLogInitSub(SCConfNode *conf, OutputCtx *parent_ctx)
+static OutputInitResult NFSLogInitSub(ConfNode *conf,
+    OutputCtx *parent_ctx)
 {
-    SCAppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_NFS);
-    SCAppLayerParserRegisterLogger(IPPROTO_UDP, ALPROTO_NFS);
+    AppLayerParserRegisterLogger(IPPROTO_TCP, ALPROTO_NFS);
+    AppLayerParserRegisterLogger(IPPROTO_UDP, ALPROTO_NFS);
     return OutputJsonLogInitSub(conf, parent_ctx);
 }
 
 void JsonNFSLogRegister(void)
 {
     /* Register as an eve sub-module. */
-    OutputRegisterTxSubModule(LOGGER_JSON_TX, "eve-log", "JsonNFSLog", "eve-log.nfs", NFSLogInitSub,
-            ALPROTO_NFS, JsonNFSLogger, JsonLogThreadInit, JsonLogThreadDeinit);
+    OutputRegisterTxSubModule(LOGGER_JSON_NFS, "eve-log", "JsonNFSLog",
+        "eve-log.nfs", NFSLogInitSub, ALPROTO_NFS,
+        JsonNFSLogger, JsonLogThreadInit,
+        JsonLogThreadDeinit, NULL);
 
     SCLogDebug("NFS JSON logger registered.");
 }

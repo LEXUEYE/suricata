@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2023 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -71,60 +71,62 @@ void DetectWithinRegister(void)
 static int DetectWithinSetup(DetectEngineCtx *de_ctx, Signature *s, const char *withinstr)
 {
     const char *str = withinstr;
+    SigMatch *pm = NULL;
+    int ret = -1;
 
     /* retrieve the sm to apply the within against */
-    SigMatch *pm = DetectGetLastSMFromLists(s, DETECT_CONTENT, -1);
+    pm = DetectGetLastSMFromLists(s, DETECT_CONTENT, -1);
     if (pm == NULL) {
-        SCLogError("within needs preceding content option");
-        return -1;
+        SCLogError(SC_ERR_OFFSET_MISSING_CONTENT, "within needs "
+                   "preceding content option");
+        goto end;
     }
 
     /* verify other conditions */
     DetectContentData *cd = (DetectContentData *)pm->ctx;
     if (cd->flags & DETECT_CONTENT_WITHIN) {
-        SCLogError("can't use multiple withins for the same content.");
-        return -1;
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't use multiple withins for the same content.");
+        goto end;
     }
     if ((cd->flags & DETECT_CONTENT_DEPTH) || (cd->flags & DETECT_CONTENT_OFFSET)) {
-        SCLogError("can't use a relative "
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't use a relative "
                    "keyword like within/distance with a absolute "
                    "relative keyword like depth/offset for the same "
-                   "content.");
-        return -1;
+                   "content." );
+        goto end;
     }
     if (cd->flags & DETECT_CONTENT_NEGATED && cd->flags & DETECT_CONTENT_FAST_PATTERN) {
-        SCLogError("can't have a relative "
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't have a relative "
                    "negated keyword set along with a fast_pattern");
-        return -1;
+        goto end;
     }
     if (cd->flags & DETECT_CONTENT_FAST_PATTERN_ONLY) {
-        SCLogError("can't have a relative "
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "can't have a relative "
                    "keyword set along with a fast_pattern:only;");
-        return -1;
+        goto end;
     }
     if (str[0] != '-' && isalpha((unsigned char)str[0])) {
         DetectByteIndexType index;
-        if (!DetectByteRetrieveSMVar(str, s, -1, &index)) {
-            SCLogError("unknown byte_ keyword var "
-                       "seen in within - %s",
-                    str);
-            return -1;
+        if (!DetectByteRetrieveSMVar(str, s, &index)) {
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "unknown byte_ keyword var "
+                       "seen in within - %s\n", str);
+            goto end;
         }
         cd->within = index;
         cd->flags |= DETECT_CONTENT_WITHIN_VAR;
     } else {
-        if ((StringParseI32RangeCheck(&cd->within, 0, 0, str, -DETECT_CONTENT_VALUE_MAX,
-                     DETECT_CONTENT_VALUE_MAX) < 0)) {
-            SCLogError("invalid value for within: %s", str);
-            return -1;
+        if (StringParseInt32(&cd->within, 0, 0, str) < 0) {
+            SCLogError(SC_ERR_INVALID_SIGNATURE,
+                      "invalid value for within: %s", str);
+            goto end;
         }
 
         if (cd->within < (int32_t)cd->content_len) {
-            SCLogError("within argument \"%" PRIi32 "\" is "
-                       "less than the content length \"%" PRIu32 "\" which is invalid, since "
-                       "this will never match.  Invalidating signature",
-                    cd->within, cd->content_len);
-            return -1;
+            SCLogError(SC_ERR_WITHIN_INVALID, "within argument \"%"PRIi32"\" is "
+                       "less than the content length \"%"PRIu32"\" which is invalid, since "
+                       "this will never match.  Invalidating signature", cd->within,
+                       cd->content_len);
+            goto end;
         }
     }
     cd->flags |= DETECT_CONTENT_WITHIN;
@@ -135,23 +137,27 @@ static int DetectWithinSetup(DetectEngineCtx *de_ctx, Signature *s, const char *
     SigMatch *prev_pm = DetectGetLastSMByListPtr(s, pm->prev,
             DETECT_CONTENT, DETECT_PCRE, -1);
     if (prev_pm == NULL) {
-        return 0;
+        ret = 0;
+        goto end;
     }
     if (prev_pm->type == DETECT_CONTENT) {
         DetectContentData *prev_cd = (DetectContentData *)prev_pm->ctx;
         if (prev_cd->flags & DETECT_CONTENT_FAST_PATTERN_ONLY) {
-            SCLogError("previous keyword "
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "previous keyword "
                        "has a fast_pattern:only; set. Can't "
                        "have relative keywords around a fast_pattern "
                        "only content");
-            return -1;
+            goto end;
         }
         prev_cd->flags |= DETECT_CONTENT_WITHIN_NEXT;
     } else if (prev_pm->type == DETECT_PCRE) {
         DetectPcreData *pd = (DetectPcreData *)prev_pm->ctx;
         pd->flags |= DETECT_PCRE_RELATIVE_NEXT;
     }
-    return 0;
+
+    ret = 0;
+ end:
+    return ret;
 }
 
 /***********************************Unittests**********************************/

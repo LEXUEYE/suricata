@@ -29,7 +29,6 @@
 #include "suricata.h"
 #include "tm-threads.h"
 #include "source-erf-file.h"
-#include "util-datalink.h"
 
 #define DAG_TYPE_ETH 2
 
@@ -116,10 +115,6 @@ TmEcode ReceiveErfFileLoop(ThreadVars *tv, void *data, void *slot)
 
     etv->slot = ((TmSlot *)slot)->slot_next;
 
-    // Indicate that the thread is actually running its application level code (i.e., it can poll
-    // packets)
-    TmThreadsSetFlag(tv, THV_RUNNING);
-
     while (1) {
         if (suricata_ctl_flags & SURICATA_STOP) {
             SCReturnInt(TM_ECODE_OK);
@@ -131,7 +126,7 @@ TmEcode ReceiveErfFileLoop(ThreadVars *tv, void *data, void *slot)
 
         p = PacketGetFromQueueOrAlloc();
         if (unlikely(p == NULL)) {
-            SCLogError("Failed to allocate a packet.");
+            SCLogError(SC_ERR_MEM_ALLOC, "Failed to allocate a packet.");
             EngineStop();
             SCReturnInt(TM_ECODE_FAILED);
         }
@@ -158,7 +153,7 @@ static inline TmEcode ReadErfRecord(ThreadVars *tv, Packet *p, void *data)
     ErfFileThreadVars *etv = (ErfFileThreadVars *)data;
     DagRecord dr;
 
-    size_t r = fread(&dr, sizeof(DagRecord), 1, etv->erf);
+    int r = fread(&dr, sizeof(DagRecord), 1, etv->erf);
     if (r < 1) {
         if (feof(etv->erf)) {
             SCLogInfo("End of ERF file reached");
@@ -171,8 +166,8 @@ static inline TmEcode ReadErfRecord(ThreadVars *tv, Packet *p, void *data)
     uint16_t rlen = SCNtohs(dr.rlen);
     uint16_t wlen = SCNtohs(dr.wlen);
     if (rlen < sizeof(DagRecord)) {
-        SCLogError("Bad ERF record, "
-                   "record length less than size of header");
+        SCLogError(SC_ERR_ERF_BAD_RLEN, "Bad ERF record, "
+            "record length less than size of header");
         SCReturnInt(TM_ECODE_FAILED);
     }
     r = fread(GET_PKT_DATA(p), rlen - sizeof(DagRecord), 1, etv->erf);
@@ -188,20 +183,24 @@ static inline TmEcode ReadErfRecord(ThreadVars *tv, Packet *p, void *data)
 
     /* Only support ethernet at this time. */
     if (dr.type != DAG_TYPE_ETH) {
-        SCLogError("DAG record type %d not implemented.", dr.type);
+        SCLogError(SC_ERR_UNIMPLEMENTED,
+            "DAG record type %d not implemented.", dr.type);
         SCReturnInt(TM_ECODE_FAILED);
     }
 
     GET_PKT_LEN(p) = wlen;
     p->datalink = LINKTYPE_ETHERNET;
 
-    /* Convert ERF time to SCTime_t */
+    /* Convert ERF time to timeval - from libpcap. */
     uint64_t ts = dr.ts;
-    p->ts = SCTIME_FROM_SECS(ts >> 32);
+    p->ts.tv_sec = ts >> 32;
     ts = (ts & 0xffffffffULL) * 1000000;
     ts += 0x80000000; /* rounding */
-    uint64_t usecs = (ts >> 32);
-    p->ts = SCTIME_ADD_USECS(p->ts, usecs);
+    p->ts.tv_usec = ts >> 32;
+    if (p->ts.tv_usec >= 1000000) {
+        p->ts.tv_usec -= 1000000;
+        p->ts.tv_sec++;
+    }
 
     etv->pkts++;
     etv->bytes += wlen;
@@ -218,29 +217,29 @@ ReceiveErfFileThreadInit(ThreadVars *tv, const void *initdata, void **data)
     SCEnter();
 
     if (initdata == NULL) {
-        SCLogError("Error: No filename provided.");
+        SCLogError(SC_ERR_INVALID_ARGUMENT, "Error: No filename provided.");
         SCReturnInt(TM_ECODE_FAILED);
     }
 
     FILE *erf = fopen((const char *)initdata, "r");
     if (erf == NULL) {
-        SCLogError("Failed to open %s: %s", (char *)initdata, strerror(errno));
+        SCLogError(SC_ERR_FOPEN, "Failed to open %s: %s", (char *)initdata,
+            strerror(errno));
         exit(EXIT_FAILURE);
     }
 
-    ErfFileThreadVars *etv = SCCalloc(1, sizeof(ErfFileThreadVars));
+    ErfFileThreadVars *etv = SCMalloc(sizeof(ErfFileThreadVars));
     if (unlikely(etv == NULL)) {
-        SCLogError("Failed to allocate memory for ERF file thread vars.");
+        SCLogError(SC_ERR_MEM_ALLOC, "Failed to allocate memory for ERF file thread vars.");
         fclose(erf);
         SCReturnInt(TM_ECODE_FAILED);
     }
+    memset(etv, 0, sizeof(*etv));
     etv->erf = erf;
     etv->tv = tv;
     *data = (void *)etv;
 
     SCLogInfo("Processing ERF file %s", (char *)initdata);
-
-    DatalinkSetGlobalType(LINKTYPE_ETHERNET);
 
     SCReturnInt(TM_ECODE_OK);
 }

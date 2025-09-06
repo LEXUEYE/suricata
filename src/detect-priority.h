@@ -24,10 +24,11 @@
  * Implements the priority keyword
  */
 
-#ifndef SURICATA_DETECT_PRIORITY_H
-#define SURICATA_DETECT_PRIORITY_H
+#ifndef __DETECT_PRIORITY_H__
+#define __DETECT_PRIORITY_H__
 
 /* prototypes */
 void DetectPriorityRegister (void);
 
-#endif /* SURICATA_DETECT_PRIORITY_H */
+#endif /* __DETECT_PRIORITY_H__ */
+

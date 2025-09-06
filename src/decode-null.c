@@ -1,4 +1,4 @@
-/* Copyright (C) 2015-2021 Open Information Security Foundation
+/* Copyright (C) 2015 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,12 +21,13 @@
  * @{
  */
 
+
 /**
  * \file
  *
  * \author Victor Julien <victor@inliniac.net>
  *
- * Decode linktype null:
+ * Decode linkype null:
  * http://www.tcpdump.org/linktypes.html
  */
 
@@ -35,9 +36,12 @@
 #include "decode-raw.h"
 #include "decode-events.h"
 
-#include "util-validate.h"
 #include "util-unittest.h"
 #include "util-debug.h"
+
+#include "pkt-var.h"
+#include "util-profiling.h"
+#include "host.h"
 
 #define HDR_SIZE 4
 
@@ -51,8 +55,6 @@
 int DecodeNull(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
         const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
-
     StatsIncr(tv, dtv->counter_null);
 
     if (unlikely(len < HDR_SIZE)) {
@@ -71,11 +73,7 @@ int DecodeNull(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
     switch(type) {
         case AF_INET:
             SCLogDebug("IPV4 Packet");
-            if (GET_PKT_LEN(p) - HDR_SIZE > USHRT_MAX) {
-                return TM_ECODE_FAILED;
-            }
-            DecodeIPV4(
-                    tv, dtv, p, GET_PKT_DATA(p) + HDR_SIZE, (uint16_t)(GET_PKT_LEN(p) - HDR_SIZE));
+            DecodeIPV4(tv, dtv, p, GET_PKT_DATA(p)+HDR_SIZE, GET_PKT_LEN(p)-HDR_SIZE);
             break;
         case AF_INET6_BSD:
         case AF_INET6_FREEBSD:
@@ -84,11 +82,7 @@ int DecodeNull(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
         case AF_INET6_SOLARIS:
         case AF_INET6_WINSOCK:
             SCLogDebug("IPV6 Packet");
-            if (GET_PKT_LEN(p) - HDR_SIZE > USHRT_MAX) {
-                return TM_ECODE_FAILED;
-            }
-            DecodeIPV6(
-                    tv, dtv, p, GET_PKT_DATA(p) + HDR_SIZE, (uint16_t)(GET_PKT_LEN(p) - HDR_SIZE));
+            DecodeIPV6(tv, dtv, p, GET_PKT_DATA(p)+HDR_SIZE, GET_PKT_LEN(p)-HDR_SIZE);
             break;
         default:
             SCLogDebug("Unknown Null packet type version %" PRIu32 "", type);
@@ -98,6 +92,18 @@ int DecodeNull(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p,
     return TM_ECODE_OK;
 }
 
+#ifdef UNITTESTS
+
+#endif /* UNITTESTS */
+
+/**
+ * \brief Registers Null unit tests
+ */
+void DecodeNullRegisterTests(void)
+{
+#ifdef UNITTESTS
+#endif /* UNITTESTS */
+}
 /**
  * @}
  */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2017 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -25,23 +25,25 @@
  */
 
 #include "suricata-common.h"
+#include "decode.h"
+#include "detect.h"
+#include "detect-engine.h"
+#include "detect-engine-prefilter.h"
+#include "conf.h"
+
+#include "tm-threads.h"
+
+#include "util-unittest.h"
+#include "util-byte.h"
 #include "util-profiling.h"
+#include "util-profiling-locks.h"
 
 #ifdef PROFILING
-#include "detect-engine-prefilter.h"
-#include "util-conf.h"
-#include "util-path.h"
-#include "util-time.h"
 
 typedef struct SCProfilePrefilterData_ {
     uint64_t called;
     uint64_t total;
     uint64_t max;
-    uint64_t total_bytes;
-    uint64_t max_bytes;
-    uint64_t bytes_called; /**< number of times total_bytes was updated. Differs from `called` as a
-                              prefilter engine may skip mpm if the smallest pattern is bigger than
-                              the buffer to inspect. */
     const char *name;
 } SCProfilePrefilterData;
 
@@ -60,24 +62,22 @@ static const char *profiling_file_mode = "a";
 
 void SCProfilingPrefilterGlobalInit(void)
 {
-    SCConfNode *conf;
+    ConfNode *conf;
 
-    conf = SCConfGetNode("profiling.prefilter");
+    conf = ConfGetNode("profiling.prefilter");
     if (conf != NULL) {
-        if (SCConfNodeChildValueIsTrue(conf, "enabled")) {
+        if (ConfNodeChildValueIsTrue(conf, "enabled")) {
             profiling_prefilter_enabled = 1;
-            const char *filename = SCConfNodeLookupChildValue(conf, "filename");
+            const char *filename = ConfNodeLookupChildValue(conf, "filename");
             if (filename != NULL) {
-                if (PathIsAbsolute(filename)) {
-                    strlcpy(profiling_file_name, filename, sizeof(profiling_file_name));
-                } else {
-                    const char *log_dir = SCConfigGetLogDirectory();
-                    snprintf(profiling_file_name, sizeof(profiling_file_name), "%s/%s", log_dir,
-                            filename);
-                }
+                const char *log_dir;
+                log_dir = ConfigGetLogDirectory();
 
-                const char *v = SCConfNodeLookupChildValue(conf, "append");
-                if (v == NULL || SCConfValIsTrue(v)) {
+                snprintf(profiling_file_name, sizeof(profiling_file_name), "%s/%s",
+                        log_dir, filename);
+
+                const char *v = ConfNodeLookupChildValue(conf, "append");
+                if (v == NULL || ConfValIsTrue(v)) {
                     profiling_file_mode = "a";
                 } else {
                     profiling_file_mode = "w";
@@ -99,20 +99,13 @@ static void DoDump(SCProfilePrefilterDetectCtx *rules_ctx, FILE *fp, const char 
     fprintf(fp, "  ----------------------------------------------"
             "------------------------------------------------------"
             "----------------------------\n");
-    fprintf(fp, "  %-32s %-15s %-15s %-15s %-15s %-15s %-15s %-15s %-15s %-15s\n", "Prefilter",
-            "Ticks", "Called", "Max Ticks", "Avg", "Bytes", "Called", "Max Bytes", "Avg Bytes",
-            "Ticks/Byte");
+    fprintf(fp, "  %-32s %-15s %-15s %-15s %-15s\n", "Prefilter", "Ticks", "Called", "Max Ticks", "Avg");
     fprintf(fp, "  -------------------------------- "
                 "--------------- "
                 "--------------- "
                 "--------------- "
                 "--------------- "
-                "--------------- "
-                "--------------- "
-                "--------------- "
-                "--------------- "
-                "--------------- "
-                "\n");
+        "\n");
     for (i = 0; i < (int)rules_ctx->size; i++) {
         SCProfilePrefilterData *d = &rules_ctx->data[i];
         if (d == NULL || d->called== 0)
@@ -121,22 +114,16 @@ static void DoDump(SCProfilePrefilterDetectCtx *rules_ctx, FILE *fp, const char 
         uint64_t ticks = d->total;
         double avgticks = 0;
         if (ticks && d->called) {
-            avgticks = (double)(ticks / d->called);
-        }
-        double avgbytes = 0;
-        if (d->total_bytes && d->bytes_called) {
-            avgbytes = (double)(d->total_bytes / d->bytes_called);
-        }
-        double ticks_per_byte = 0;
-        if (ticks && d->total_bytes) {
-            ticks_per_byte = (double)(ticks / d->total_bytes);
+            avgticks = (ticks / d->called);
         }
 
         fprintf(fp,
-                "  %-32s %-15" PRIu64 " %-15" PRIu64 " %-15" PRIu64 " %-15.2f %-15" PRIu64
-                " %-15" PRIu64 " %-15" PRIu64 " %-15.2f %-15.2f\n",
-                d->name, ticks, d->called, d->max, avgticks, d->total_bytes, d->bytes_called,
-                d->max_bytes, avgbytes, ticks_per_byte);
+            "  %-32s %-15"PRIu64" %-15"PRIu64" %-15"PRIu64" %-15.2f\n",
+            d->name,
+            ticks,
+            d->called,
+            d->max,
+            avgticks);
     }
 }
 
@@ -160,7 +147,8 @@ SCProfilingPrefilterDump(DetectEngineCtx *de_ctx)
         fp = fopen(profiling_file_name, profiling_file_mode);
 
         if (fp == NULL) {
-            SCLogError("failed to open %s: %s", profiling_file_name, strerror(errno));
+            SCLogError(SC_ERR_FOPEN, "failed to open %s: %s", profiling_file_name,
+                    strerror(errno));
             return;
         }
     } else {
@@ -191,8 +179,8 @@ SCProfilingPrefilterDump(DetectEngineCtx *de_ctx)
  * \param ticks Number of CPU ticks for this rule.
  * \param match Did the rule match?
  */
-void SCProfilingPrefilterUpdateCounter(DetectEngineThreadCtx *det_ctx, int id, uint64_t ticks,
-        uint64_t bytes, uint64_t bytes_called)
+void
+SCProfilingPrefilterUpdateCounter(DetectEngineThreadCtx *det_ctx, int id, uint64_t ticks)
 {
     if (det_ctx != NULL && det_ctx->prefilter_perf_data != NULL &&
             id < (int)det_ctx->de_ctx->prefilter_id)
@@ -203,20 +191,18 @@ void SCProfilingPrefilterUpdateCounter(DetectEngineThreadCtx *det_ctx, int id, u
         if (ticks > p->max)
             p->max = ticks;
         p->total += ticks;
-
-        p->bytes_called += bytes_called;
-        if (bytes > p->max_bytes)
-            p->max_bytes = bytes;
-        p->total_bytes += bytes;
     }
 }
 
 static SCProfilePrefilterDetectCtx *SCProfilingPrefilterInitCtx(void)
 {
-    SCProfilePrefilterDetectCtx *ctx = SCCalloc(1, sizeof(SCProfilePrefilterDetectCtx));
+    SCProfilePrefilterDetectCtx *ctx = SCMalloc(sizeof(SCProfilePrefilterDetectCtx));
     if (ctx != NULL) {
+        memset(ctx, 0x00, sizeof(SCProfilePrefilterDetectCtx));
+
         if (pthread_mutex_init(&ctx->data_m, NULL) != 0) {
-            FatalError("Failed to initialize hash table mutex.");
+                    FatalError(SC_ERR_FATAL,
+                               "Failed to initialize hash table mutex.");
         }
     }
 
@@ -249,8 +235,9 @@ void SCProfilingPrefilterThreadSetup(SCProfilePrefilterDetectCtx *ctx, DetectEng
 
     const uint32_t size = det_ctx->de_ctx->prefilter_id;
 
-    SCProfilePrefilterData *a = SCCalloc(1, sizeof(SCProfilePrefilterData) * size);
+    SCProfilePrefilterData *a = SCMalloc(sizeof(SCProfilePrefilterData) * size);
     if (a != NULL) {
+        memset(a, 0x00, sizeof(SCProfilePrefilterData) * size);
         det_ctx->prefilter_perf_data = a;
     }
 }
@@ -267,14 +254,6 @@ static void SCProfilingPrefilterThreadMerge(DetectEngineCtx *de_ctx, DetectEngin
         de_ctx->profile_prefilter_ctx->data[i].total += det_ctx->prefilter_perf_data[i].total;
         if (det_ctx->prefilter_perf_data[i].max > de_ctx->profile_prefilter_ctx->data[i].max)
             de_ctx->profile_prefilter_ctx->data[i].max = det_ctx->prefilter_perf_data[i].max;
-        de_ctx->profile_prefilter_ctx->data[i].total_bytes +=
-                det_ctx->prefilter_perf_data[i].total_bytes;
-        if (det_ctx->prefilter_perf_data[i].max_bytes >
-                de_ctx->profile_prefilter_ctx->data[i].max_bytes)
-            de_ctx->profile_prefilter_ctx->data[i].max_bytes =
-                    det_ctx->prefilter_perf_data[i].max_bytes;
-        de_ctx->profile_prefilter_ctx->data[i].bytes_called +=
-                det_ctx->prefilter_perf_data[i].bytes_called;
     }
 }
 
@@ -310,8 +289,9 @@ SCProfilingPrefilterInitCounters(DetectEngineCtx *de_ctx)
     BUG_ON(de_ctx->profile_prefilter_ctx == NULL);
     de_ctx->profile_prefilter_ctx->size = size;
 
-    de_ctx->profile_prefilter_ctx->data = SCCalloc(1, sizeof(SCProfilePrefilterData) * size);
+    de_ctx->profile_prefilter_ctx->data = SCMalloc(sizeof(SCProfilePrefilterData) * size);
     BUG_ON(de_ctx->profile_prefilter_ctx->data == NULL);
+    memset(de_ctx->profile_prefilter_ctx->data, 0x00, sizeof(SCProfilePrefilterData) * size);
 
     HashListTableBucket *hb = HashListTableGetListHead(de_ctx->prefilter_hash_table);
     for ( ; hb != NULL; hb = HashListTableGetListNext(hb)) {

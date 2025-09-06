@@ -21,9 +21,9 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_SSH_SOFTWARE_H
-#define SURICATA_DETECT_SSH_SOFTWARE_H
+#ifndef __DETECT_SSH_SOFTWARE_H__
+#define __DETECT_SSH_SOFTWARE_H__
 
 void DetectSshSoftwareRegister(void);
 
-#endif /* SURICATA_DETECT_SSH_SOFTWARE_H */
+#endif /* __DETECT_SSH_SOFTWARE_H__ */

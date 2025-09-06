@@ -21,16 +21,19 @@
  * \author Pablo Rincon Crespo <pablo.rincon.crespo@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_CPU_H
-#define SURICATA_UTIL_CPU_H
+#ifndef __UTIL_CPU_H__
+#define __UTIL_CPU_H__
 
 /* Processors configured: */
 uint16_t UtilCpuGetNumProcessorsConfigured(void);
 /* Processors online: */
 uint16_t UtilCpuGetNumProcessorsOnline(void);
 
+/* Only on Solaris */
+uint16_t UtilCpuGetNumProcessorsMax(void);
+
 void UtilCpuPrintSummary(void);
 
 uint64_t UtilCpuGetTicks(void);
 
-#endif /* SURICATA_UTIL_CPU_H */
+#endif /* __UTIL_CPU_H__ */

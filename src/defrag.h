@@ -21,13 +21,11 @@
  * \author Endace Technology Limited, Jason Ish <jason.ish@endace.com>
  */
 
-#ifndef SURICATA_DEFRAG_H
-#define SURICATA_DEFRAG_H
+#ifndef __DEFRAG_H__
+#define __DEFRAG_H__
 
-#include "threads.h"
+#include "tree.h"
 #include "util-pool.h"
-#include "threadvars.h"
-#include "decode.h"
 
 /**
  * A context for an instance of a fragmentation re-assembler, in case
@@ -37,7 +35,7 @@ typedef struct DefragContext_ {
     Pool *frag_pool; /**< Pool of fragments. */
     SCMutex frag_pool_lock;
 
-    uint32_t timeout; /**< Default timeout. */
+    time_t timeout; /**< Default timeout. */
 } DefragContext;
 
 /**
@@ -47,13 +45,15 @@ typedef struct Frag_ {
     uint16_t offset;            /**< The offset of this fragment, already
                                  *   multiplied by 8. */
 
-    uint32_t len; /**< The length of this fragment. */
+    uint16_t len;               /**< The length of this fragment. */
 
     uint8_t hlen;               /**< The length of this fragments IP header. */
 
     uint8_t more_frags:4;       /**< More frags? */
     uint8_t skip:4;             /**< Skip this fragment during re-assembly. */
 
+    uint16_t ip_hdr_offset;     /**< Offset in the packet where the IP
+                                 * header starts. */
     uint16_t frag_hdr_offset;   /**< Offset in the packet where the frag
                                  * header starts. */
 
@@ -85,9 +85,7 @@ typedef struct DefragTracker_ {
     SCMutex lock; /**< Mutex for locking list operations on
                            * this tracker. */
 
-    uint16_t vlan_id[VLAN_MAX_LAYERS]; /**< VLAN ID tracker applies to. */
-    uint16_t ip_hdr_offset;            /**< Offset in the packet where the IP
-                                        * header starts. */
+    uint16_t vlan_id[2]; /**< VLAN ID tracker applies to. */
 
     uint32_t id; /**< IP ID for this tracker.  32 bits for IPv6, 16
                   * for IPv4. */
@@ -106,8 +104,7 @@ typedef struct DefragTracker_ {
     Address src_addr; /**< Source address for this tracker. */
     Address dst_addr; /**< Destination address for this tracker. */
 
-    int datalink;           /**< datalink for reassembled packet, set by first fragment */
-    SCTime_t timeout;       /**< When this tracker will timeout. */
+    struct timeval timeout; /**< When this tracker will timeout. */
     uint32_t host_timeout;  /**< Host timeout, statically assigned from the yaml */
 
     /** use cnt, reference counter */
@@ -115,19 +112,22 @@ typedef struct DefragTracker_ {
 
     struct IP_FRAGMENTS fragment_tree;
 
-    /** hash pointer, protected by hash row mutex/spin */
+    /** hash pointers, protected by hash row mutex/spin */
     struct DefragTracker_ *hnext;
+    struct DefragTracker_ *hprev;
 
-    /** stack pointer, protected by tracker-queue mutex/spin */
+    /** list pointers, protected by tracker-queue mutex/spin */
     struct DefragTracker_ *lnext;
+    struct DefragTracker_ *lprev;
 } DefragTracker;
 
 void DefragInit(void);
 void DefragDestroy(void);
+void DefragReload(void); /**< use only in unittests */
 
 uint8_t DefragGetOsPolicy(Packet *);
 void DefragTrackerFreeFrags(DefragTracker *);
 Packet *Defrag(ThreadVars *, DecodeThreadVars *, Packet *);
 void DefragRegisterTests(void);
 
-#endif /* SURICATA_DEFRAG_H */
+#endif /* __DEFRAG_H__ */

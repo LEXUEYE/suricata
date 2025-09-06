@@ -21,9 +21,9 @@
  * \author Eric Leblond <eric@regit.org>
  */
 
-#ifndef SURICATA_DETECT_TARGET_H
-#define SURICATA_DETECT_TARGET_H
+#ifndef __DETECT_TARGET_H__
+#define __DETECT_TARGET_H__
 
 void DetectTargetRegister(void);
 
-#endif /* SURICATA_DETECT_TARGET_H */
+#endif /* __DETECT_TARGET_H__ */

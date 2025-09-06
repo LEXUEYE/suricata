@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2013 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DECODE_UDP_H
-#define SURICATA_DECODE_UDP_H
+#ifndef __DECODE_UDP_H__
+#define __DECODE_UDP_H__
 
 #define UDP_HEADER_LEN         8
 
@@ -44,11 +44,18 @@ typedef struct UDPHdr_
 	uint16_t uh_dport;  /* destination port */
 	uint16_t uh_len;    /* length */
 	uint16_t uh_sum;    /* checksum */
-} UDPHdr;
+} __attribute__((__packed__)) UDPHdr;
+
+#define CLEAR_UDP_PACKET(p) do {    \
+    (p)->level4_comp_csum = -1;     \
+    (p)->udph = NULL;               \
+} while (0)
 
 void DecodeUDPV4RegisterTests(void);
 
 /** ------ Inline function ------ */
+static inline uint16_t UDPV4Checksum(uint16_t *, uint16_t *, uint16_t, uint16_t);
+static inline uint16_t UDPV6Checksum(uint16_t *, uint16_t *, uint16_t, uint16_t);
 
 /**
  * \brief Calculate or valid the checksum for the UDP packet
@@ -63,8 +70,8 @@ void DecodeUDPV4RegisterTests(void);
  * \retval csum For validation 0 will be returned for success, for calculation
  *    this will be the checksum.
  */
-static inline uint16_t UDPV4Checksum(
-        const uint16_t *shdr, const uint16_t *pkt, uint16_t tlen, uint16_t init)
+static inline uint16_t UDPV4Checksum(uint16_t *shdr, uint16_t *pkt,
+                                     uint16_t tlen, uint16_t init)
 {
     uint16_t pad = 0;
     uint32_t csum = init;
@@ -130,8 +137,8 @@ static inline uint16_t UDPV4Checksum(
  * \retval csum For validation 0 will be returned for success, for calculation
  *    this will be the checksum.
  */
-static inline uint16_t UDPV6Checksum(
-        const uint16_t *shdr, const uint16_t *pkt, uint16_t tlen, uint16_t init)
+static inline uint16_t UDPV6Checksum(uint16_t *shdr, uint16_t *pkt,
+                                     uint16_t tlen, uint16_t init)
 {
     uint16_t pad = 0;
     uint32_t csum = init;
@@ -186,4 +193,5 @@ static inline uint16_t UDPV6Checksum(
         return csum_u16;
 }
 
-#endif /* SURICATA_DECODE_UDP_H */
+
+#endif /* __DECODE_UDP_H__ */

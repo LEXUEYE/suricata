@@ -15,14 +15,11 @@
  * 02110-1301, USA.
  */
 
-//! HTTP/2 parser, detection, logger and application layer module.
-
-#![allow(clippy::result_unit_err)]
-
+#[cfg(feature = "decompression")]
 mod decompression;
 pub mod detect;
+pub mod files;
 pub mod http2;
 mod huffman;
 pub mod logger;
 mod parser;
-mod range;

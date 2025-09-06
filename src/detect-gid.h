@@ -23,8 +23,12 @@
  * Implements the gid keyword
  */
 
-#ifndef SURICATA_DETECT_GID_H
-#define SURICATA_DETECT_GID_H
+#ifndef __DETECT_GID_H__
+#define __DETECT_GID_H__
+
+#include "decode-events.h"
+#include "decode-ipv4.h"
+#include "decode-tcp.h"
 
 /**
  * Registration function for gid: keyword
@@ -32,4 +36,4 @@
 
 void DetectGidRegister (void);
 
-#endif /*SURICATA_DETECT_GID_H */
+#endif /*__DETECT_GID_H__ */

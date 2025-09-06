@@ -30,20 +30,36 @@
  */
 
 #include "suricata-common.h"
-#include "decode-vntag.h"
 #include "decode.h"
+#include "decode-vntag.h"
 #include "decode-events.h"
 
-#include "util-validate.h"
+#include "flow.h"
+
 #include "util-unittest.h"
 #include "util-debug.h"
+
+#include "pkt-var.h"
+#include "util-profiling.h"
+#include "host.h"
+
+bool g_vntag_enabled = false;
+
+void DecodeVNTagConfig(void)
+{
+    int enabled = 0;
+    if (ConfGetBool("decoder.vntag.enabled", &enabled) == 1) {
+        g_vntag_enabled = (enabled == 1);
+    }
+    SCLogDebug("VNTag decode support %s", g_vntag_enabled ? "enabled" : "disabled");
+}
 
 /**
  * \internal
  * \brief this function is used to decode 802.1Qbh packets
  *
  * \param tv pointer to the thread vars
- * \param dtv pointer code thread vars
+ * \param dtv pointer to decode thread vars
  * \param p pointer to the packet struct
  * \param pkt pointer to the raw packet
  * \param len packet len
@@ -51,7 +67,8 @@
  */
 int DecodeVNTag(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p, const uint8_t *pkt, uint32_t len)
 {
-    DEBUG_VALIDATE_BUG_ON(pkt == NULL);
+    if (!g_vntag_enabled)
+        return TM_ECODE_FAILED;
 
     StatsIncr(tv, dtv->counter_vntag);
 
@@ -65,6 +82,8 @@ int DecodeVNTag(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p, const uint8_t 
     }
 
     VNTagHdr *vntag_hdr = (VNTagHdr *)pkt;
+    if (vntag_hdr == NULL)
+        return TM_ECODE_FAILED;
 
     uint16_t proto = GET_VNTAG_PROTO(vntag_hdr);
 
@@ -83,12 +102,12 @@ int DecodeVNTag(ThreadVars *tv, DecodeThreadVars *dtv, Packet *p, const uint8_t 
 }
 
 #ifdef UNITTESTS
-#include "util-unittest-helper.h"
-#include "packet.h"
 
 /**
  * \test DecodeVNTagTest01 test if vntag header is too small.
  *
+ *  \retval 1 on success
+ *  \retval 0 on failure
  */
 static int DecodeVNTagtest01(void)
 {
@@ -102,16 +121,18 @@ static int DecodeVNTagtest01(void)
     memset(&tv, 0, sizeof(ThreadVars));
     memset(&dtv, 0, sizeof(DecodeThreadVars));
 
+    g_vntag_enabled = true;
     FAIL_IF(TM_ECODE_OK == DecodeVNTag(&tv, &dtv, p, raw_vntag, sizeof(raw_vntag)));
+    g_vntag_enabled = false;
 
-    FAIL_IF_NOT(ENGINE_ISSET_EVENT(p, VNTAG_HEADER_TOO_SMALL));
-    PacketFree(p);
-    PASS;
+    PASS_IF(ENGINE_ISSET_EVENT(p, VNTAG_HEADER_TOO_SMALL));
 }
 
 /**
  * \test DecodeVNTagt02 test if vntag header has unknown type.
  *
+ *  \retval 1 on success
+ *  \retval 0 on failure
  */
 static int DecodeVNTagtest02(void)
 {
@@ -132,14 +153,17 @@ static int DecodeVNTagtest02(void)
     memset(&tv, 0, sizeof(ThreadVars));
     memset(&dtv, 0, sizeof(DecodeThreadVars));
 
-    FAIL_IF_NOT(TM_ECODE_OK != DecodeVNTag(&tv, &dtv, p, raw_vntag, sizeof(raw_vntag)));
-    PacketFree(p);
-    PASS;
+    g_vntag_enabled = true;
+    int rc = DecodeVNTag(&tv, &dtv, p, raw_vntag, sizeof(raw_vntag));
+    g_vntag_enabled = false;
+    PASS_IF(TM_ECODE_OK != rc);
 }
 
 /**
  * \test DecodeVNTagTest03 test a good vntag header.
  *
+ *  \retval 1 on success
+ *  \retval 0 on failure
  */
 static int DecodeVNTagtest03(void)
 {
@@ -160,11 +184,26 @@ static int DecodeVNTagtest03(void)
 
     FlowInitConfig(FLOW_QUIET);
 
+    g_vntag_enabled = true;
     FAIL_IF(TM_ECODE_OK != DecodeVNTag(&tv, &dtv, p, raw_vntag, sizeof(raw_vntag)));
+    g_vntag_enabled = false;
 
-    PacketRecycle(p);
+    PACKET_RECYCLE(p);
     FlowShutdown();
-    PacketFree(p);
+    SCFree(p);
+
+    PASS;
+}
+
+/**
+ * \test DecodeVNTagtest04 Ensure decoder is disabled by default
+ *
+ *  \retval 1 on success
+ *  \retval 0 on failure
+ */
+static int DecodeVNTagtest04(void)
+{
+    FAIL_IF(g_vntag_enabled);
     PASS;
 }
 #endif /* UNITTESTS */
@@ -175,6 +214,7 @@ void DecodeVNTagRegisterTests(void)
     UtRegisterTest("DecodeVNTagtest01", DecodeVNTagtest01);
     UtRegisterTest("DecodeVNTagtest02", DecodeVNTagtest02);
     UtRegisterTest("DecodeVNTagtest03", DecodeVNTagtest03);
+    UtRegisterTest("DecodeVNTagtest04", DecodeVNTagtest04);
 #endif /* UNITTESTS */
 }
 

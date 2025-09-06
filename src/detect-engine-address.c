@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2021 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -54,10 +54,6 @@ static void DetectAddressPrint(DetectAddress *);
 static int DetectAddressCutNot(DetectAddress *, DetectAddress **);
 static int DetectAddressCut(DetectEngineCtx *, DetectAddress *, DetectAddress *,
                             DetectAddress **);
-static int DetectAddressParse2(const DetectEngineCtx *de_ctx, DetectAddressHead *gh,
-        DetectAddressHead *ghn, const char *s, int negate, ResolvedVariablesList *var_list,
-        int recur);
-
 int DetectAddressMergeNot(DetectAddressHead *gh, DetectAddressHead *ghn);
 
 /**
@@ -85,6 +81,7 @@ void DetectAddressFree(DetectAddress *ag)
         return;
 
     SCFree(ag);
+    return;
 }
 
 /**
@@ -135,6 +132,23 @@ DetectAddress *DetectAddressCopy(DetectAddress *orig)
     COPY_ADDRESS(&orig->ip2, &ag->ip2);
     return ag;
 }
+
+#ifdef DEBUG
+/**
+ * \brief Prints the address data information for all the DetectAddress
+ *        instances in the DetectAddress list sent as the argument.
+ *
+ * \param head Pointer to a list of DetectAddress instances.
+ */
+void DetectAddressPrintList(DetectAddress *head)
+{
+    SCLogInfo("list:");
+    for (DetectAddress *cur = head; cur != NULL; cur = cur->next) {
+        DetectAddressPrint(cur);
+    }
+    SCLogInfo("endlist");
+}
+#endif
 
 /**
  * \internal
@@ -371,6 +385,44 @@ bool DetectAddressListsAreEqual(DetectAddress *list1, DetectAddress *list2)
 
 /**
  * \internal
+ * \brief Creates a cidr ipv6 netblock, based on the cidr netblock value.
+ *
+ *        For example if we send a cidr of 7 as argument, an ipv6 address
+ *        mask of the value FE:00:00:00:00:00:00:00 is created and updated
+ *        in the argument struct in6_addr *in6.
+ *
+ * \todo I think for the final section: while (cidr > 0), we can simply
+ *       replace it with a
+ *       if (cidr > 0) {
+ *           in6->s6_addr[i] = -1 << (8 - cidr);
+ *
+ * \param cidr The value of the cidr.
+ * \param in6  Pointer to an ipv6 address structure(struct in6_addr) which will
+ *             hold the cidr netblock result.
+ */
+static void DetectAddressParseIPv6CIDR(int cidr, struct in6_addr *in6)
+{
+    int i = 0;
+
+    memset(in6, 0, sizeof(struct in6_addr));
+
+    while (cidr > 8) {
+        in6->s6_addr[i] = 0xff;
+        cidr -= 8;
+        i++;
+    }
+
+    while (cidr > 0) {
+        in6->s6_addr[i] |= 0x80;
+        if (--cidr > 0)
+             in6->s6_addr[i] = in6->s6_addr[i] >> 1;
+    }
+
+    return;
+}
+
+/**
+ * \internal
  * \brief Parses an ipv4/ipv6 address string and updates the result into the
  *        DetectAddress instance sent as the argument.
  *
@@ -438,16 +490,6 @@ static int DetectAddressParseString(DetectAddress *dd, const char *str)
                     goto error;
 
                 netmask = in.s_addr;
-
-                /* validate netmask */
-                int cidr = CIDRFromMask(netmask);
-                if (cidr < 0) {
-                    SCLogError(
-                            "netmask \"%s\" is not usable. Only netmasks that are compatible with "
-                            "CIDR notation are supported. See ticket #5168.",
-                            mask);
-                    goto error;
-                }
             }
 
             r = inet_pton(AF_INET, ip, &in);
@@ -505,7 +547,7 @@ static int DetectAddressParseString(DetectAddress *dd, const char *str)
                 goto error;
             memcpy(&ip6addr, &in6.s6_addr, sizeof(ip6addr));
 
-            CIDRGetIPv6(cidr, &mask6);
+            DetectAddressParseIPv6CIDR(cidr, &mask6);
             memcpy(&netmask, &mask6.s6_addr, sizeof(netmask));
 
             dd->ip2.addr_data32[0] = dd->ip.addr_data32[0] = ip6addr[0] & netmask[0];
@@ -583,7 +625,7 @@ static DetectAddress *DetectAddressParseSingle(const char *str)
 
 /**
  * \brief Setup a single address string, parse it and add the resulting
- *        Address-Range(s) to the AddressHead(DetectAddressHead instance).
+ *        Address-Range(s) to the AddessHead(DetectAddressHead instance).
  *
  * \param gh Pointer to the Address-Head(DetectAddressHead) to which the
  *           resulting Address-Range(s) from the parsed ip string has to
@@ -632,7 +674,8 @@ static int DetectAddressSetup(DetectAddressHead *gh, const char *s)
     /* parse the address */
     DetectAddress *ad = DetectAddressParseSingle(s);
     if (ad == NULL) {
-        SCLogError("failed to parse address \"%s\"", s);
+        SCLogError(SC_ERR_ADDRESS_ENGINE_GENERIC,
+                "failed to parse address \"%s\"", s);
         return -1;
     }
 
@@ -672,10 +715,6 @@ static int DetectAddressSetup(DetectAddressHead *gh, const char *s)
  * \brief Parses an address string and updates the 2 address heads with the
  *        address data.
  *
- * Note that this function should only be called by the wrapping function
- * DetectAddressParse2. The wrapping function provides long address handling
- * when the address size exceeds a threshold value.
- *
  * \todo We don't seem to be handling negated cases, like [addr,![!addr,addr]],
  *       since we pass around negate without keeping a count of ! with depth.
  *       Can solve this by keeping a count of the negations with depth, so that
@@ -694,29 +733,31 @@ static int DetectAddressSetup(DetectAddressHead *gh, const char *s)
  * \retval  0 On successfully parsing.
  * \retval -1 On failure.
  */
-static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddressHead *gh,
-        DetectAddressHead *ghn, const char *s, int negate, ResolvedVariablesList *var_list,
-        int recur, char *address, size_t address_length)
+static int DetectAddressParse2(const DetectEngineCtx *de_ctx,
+        DetectAddressHead *gh, DetectAddressHead *ghn,
+        const char *s, int negate, ResolvedVariablesList *var_list,
+        int recur)
 {
     size_t x = 0;
     size_t u = 0;
     int o_set = 0, n_set = 0, d_set = 0;
     int depth = 0;
+    size_t size = strlen(s);
+    char address[8196] = "";
     const char *rule_var_address = NULL;
     char *temp_rule_var_address = NULL;
 
     if (++recur > 64) {
-        SCLogError("address block recursion "
-                   "limit reached (max 64)");
+        SCLogError(SC_ERR_ADDRESS_ENGINE_GENERIC, "address block recursion "
+                "limit reached (max 64)");
         goto error;
     }
 
     SCLogDebug("s %s negate %s", s, negate ? "true" : "false");
 
-    size_t size = strlen(s);
-    for (u = 0, x = 0; u < size && x < address_length; u++) {
-        if (x == (address_length - 1)) {
-            SCLogError("Hit the address buffer"
+    for (u = 0, x = 0; u < size && x < sizeof(address); u++) {
+        if (x == (sizeof(address) - 1)) {
+            SCLogError(SC_ERR_ADDRESS_ENGINE_GENERIC, "Hit the address buffer"
                        " limit for the supplied address.  Invalidating sig.  "
                        "Please file a bug report on this.");
             goto error;
@@ -833,11 +874,10 @@ static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddre
                     goto error;
 
                 if (strlen(rule_var_address) == 0) {
-                    SCLogError("variable %s resolved "
-                               "to nothing. This is likely a misconfiguration. "
-                               "Note that a negated address needs to be quoted, "
-                               "\"!$HOME_NET\" instead of !$HOME_NET. See issue #295.",
-                            s);
+                    SCLogError(SC_ERR_INVALID_SIGNATURE, "variable %s resolved "
+                            "to nothing. This is likely a misconfiguration. "
+                            "Note that a negated address needs to be quoted, "
+                            "\"!$HOME_NET\" instead of !$HOME_NET. See issue #295.", s);
                     goto error;
                 }
 
@@ -854,8 +894,10 @@ static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddre
                         goto error;
                 }
 
+
                 if (DetectAddressParse2(de_ctx, gh, ghn, temp_rule_var_address,
-                            (negate + n_set) % 2, var_list, recur) < 0) {
+                                    (negate + n_set) % 2, var_list, recur) < 0)
+                {
                     if (temp_rule_var_address != rule_var_address)
                         SCFree(temp_rule_var_address);
                     goto error;
@@ -881,7 +923,7 @@ static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddre
         } else if (depth == 0 && s[u] == '$') {
             d_set = 1;
         } else if (depth == 0 && u == size - 1) {
-            if (x == address_length) {
+            if (x == sizeof(address)) {
                 address[x - 1] = '\0';
             } else {
                 address[x] = '\0';
@@ -889,8 +931,8 @@ static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddre
             x = 0;
 
             if (AddVariableToResolveList(var_list, address) == -1) {
-                SCLogError("Found a loop in a address "
-                           "groups declaration. This is likely a misconfiguration.");
+                SCLogError(SC_ERR_INVALID_YAML_CONF_ENTRY, "Found a loop in a address "
+                    "groups declaration. This is likely a misconfiguration.");
                 goto error;
             }
 
@@ -901,11 +943,10 @@ static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddre
                     goto error;
 
                 if (strlen(rule_var_address) == 0) {
-                    SCLogError("variable %s resolved "
-                               "to nothing. This is likely a misconfiguration. "
-                               "Note that a negated address needs to be quoted, "
-                               "\"!$HOME_NET\" instead of !$HOME_NET. See issue #295.",
-                            s);
+                    SCLogError(SC_ERR_INVALID_SIGNATURE, "variable %s resolved "
+                            "to nothing. This is likely a misconfiguration. "
+                            "Note that a negated address needs to be quoted, "
+                            "\"!$HOME_NET\" instead of !$HOME_NET. See issue #295.", s);
                     goto error;
                 }
 
@@ -923,7 +964,7 @@ static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddre
                 }
 
                 if (DetectAddressParse2(de_ctx, gh, ghn, temp_rule_var_address,
-                            (negate + n_set) % 2, var_list, recur) < 0) {
+                                    (negate + n_set) % 2, var_list, recur) < 0) {
                     SCLogDebug("DetectAddressParse2 hates us");
                     if (temp_rule_var_address != rule_var_address)
                         SCFree(temp_rule_var_address);
@@ -950,16 +991,14 @@ static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddre
         }
     }
     if (depth > 0) {
-        SCLogError("not every address block was "
-                   "properly closed in \"%s\", %d missing closing brackets (]). "
-                   "Note: problem might be in a variable.",
-                s, depth);
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "not every address block was "
+                "properly closed in \"%s\", %d missing closing brackets (]). "
+                "Note: problem might be in a variable.", s, depth);
         goto error;
     } else if (depth < 0) {
-        SCLogError("not every address block was "
-                   "properly opened in \"%s\", %d missing opening brackets ([). "
-                   "Note: problem might be in a variable.",
-                s, depth * -1);
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "not every address block was "
+                "properly opened in \"%s\", %d missing opening brackets ([). "
+                "Note: problem might be in a variable.", s, depth*-1);
         goto error;
     }
 
@@ -968,38 +1007,6 @@ static int DetectAddressParseInternal(const DetectEngineCtx *de_ctx, DetectAddre
 error:
 
     return -1;
-}
-
-/**
- * \internal
- * \brief Wrapper function for address parsing to minimize heap allocs during address parsing.
- *
- * \retval Return value from DetectAddressParseInternal
- */
-static int DetectAddressParse2(const DetectEngineCtx *de_ctx, DetectAddressHead *gh,
-        DetectAddressHead *ghn, const char *s, int negate, ResolvedVariablesList *var_list,
-        int recur)
-{
-    int rc;
-#define MAX_ADDRESS_LENGTH 8192
-
-    size_t address_length = strlen(s);
-    if (address_length > (MAX_ADDRESS_LENGTH - 1)) {
-        char *address = SCCalloc(1, address_length);
-        if (address == NULL) {
-            SCLogError("Unable to allocate"
-                       " memory for address parsing.");
-            return -1;
-        }
-        rc = DetectAddressParseInternal(
-                de_ctx, gh, ghn, s, negate, var_list, recur, address, address_length);
-        SCFree(address);
-    } else {
-        char address[MAX_ADDRESS_LENGTH] = "";
-        rc = DetectAddressParseInternal(
-                de_ctx, gh, ghn, s, negate, var_list, recur, address, MAX_ADDRESS_LENGTH);
-    }
-    return rc;
 }
 
 /**
@@ -1044,7 +1051,7 @@ int DetectAddressMergeNot(DetectAddressHead *gh, DetectAddressHead *ghn)
     /* check if the negated list covers the entire ip space. If so
      * the user screwed up the rules/vars. */
     if (DetectAddressIsCompleteIPSpace(ghn) == 1) {
-        SCLogError("Complete IP space negated. "
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "Complete IP space negated. "
                    "Rule address range is NIL. Probably have a !any or "
                    "an address range that supplies a NULL address range");
         goto error;
@@ -1122,12 +1129,14 @@ int DetectAddressMergeNot(DetectAddressHead *gh, DetectAddressHead *ghn)
             r = DetectAddressCmp(ag, ag2);
             /* XXX more ??? */
             if (r == ADDRESS_EQ || r == ADDRESS_EB) {
-                if (ag2->prev != NULL)
+                if (ag2->prev == NULL)
+                    gh->ipv4_head = ag2->next;
+                else
                     ag2->prev->next = ag2->next;
+
                 if (ag2->next != NULL)
                     ag2->next->prev = ag2->prev;
-                if (gh->ipv4_head == ag2)
-                    gh->ipv4_head = ag2->next;
+
                 /* store the next ptr and remove the group */
                 DetectAddress *next_ag2 = ag2->next;
                 DetectAddressFree(ag2);
@@ -1148,12 +1157,14 @@ int DetectAddressMergeNot(DetectAddressHead *gh, DetectAddressHead *ghn)
         for (ag2 = gh->ipv6_head; ag2 != NULL; ) {
             r = DetectAddressCmp(ag, ag2);
             if (r == ADDRESS_EQ || r == ADDRESS_EB) { /* XXX more ??? */
-                if (ag2->prev != NULL)
+                if (ag2->prev == NULL)
+                    gh->ipv6_head = ag2->next;
+                else
                     ag2->prev->next = ag2->next;
+
                 if (ag2->next != NULL)
                     ag2->next->prev = ag2->prev;
-                if (gh->ipv6_head == ag2)
-                    gh->ipv6_head = ag2->next;
+
                 /* store the next ptr and remove the group */
                 DetectAddress *next_ag2 = ag2->next;
                 DetectAddressFree(ag2);
@@ -1183,9 +1194,8 @@ int DetectAddressMergeNot(DetectAddressHead *gh, DetectAddressHead *ghn)
             cnt++;
 
         if (ipv4_applied != cnt) {
-            SCLogError("not all IPv4 negations "
-                       "could be applied: %d != %d",
-                    cnt, ipv4_applied);
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "not all IPv4 negations "
+                    "could be applied: %d != %d", cnt, ipv4_applied);
             goto error;
         }
 
@@ -1194,17 +1204,16 @@ int DetectAddressMergeNot(DetectAddressHead *gh, DetectAddressHead *ghn)
             cnt++;
 
         if (ipv6_applied != cnt) {
-            SCLogError("not all IPv6 negations "
-                       "could be applied: %d != %d",
-                    cnt, ipv6_applied);
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "not all IPv6 negations "
+                    "could be applied: %d != %d", cnt, ipv6_applied);
             goto error;
         }
     }
 
     /* if the result is that we have no addresses we return error */
     if (gh->ipv4_head == NULL && gh->ipv6_head == NULL) {
-        SCLogError("no addresses left after "
-                   "merging addresses and negated addresses");
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "no addresses left after "
+                "merging addresses and negated addresses");
         goto error;
     }
 
@@ -1220,7 +1229,7 @@ int DetectAddressTestConfVars(void)
 
     ResolvedVariablesList var_list = TAILQ_HEAD_INITIALIZER(var_list);
 
-    SCConfNode *address_vars_node = SCConfGetNode("vars.address-groups");
+    ConfNode *address_vars_node = ConfGetNode("vars.address-groups");
     if (address_vars_node == NULL) {
         return 0;
     }
@@ -1228,7 +1237,7 @@ int DetectAddressTestConfVars(void)
     DetectAddressHead *gh = NULL;
     DetectAddressHead *ghn = NULL;
 
-    SCConfNode *seq_node;
+    ConfNode *seq_node;
     TAILQ_FOREACH(seq_node, &address_vars_node->head, next) {
         SCLogDebug("Testing %s - %s", seq_node->name, seq_node->val);
 
@@ -1242,37 +1251,43 @@ int DetectAddressTestConfVars(void)
         }
 
         if (seq_node->val == NULL) {
-            SCLogError("Address var \"%s\" probably has a sequence(something "
+            SCLogError(SC_ERR_INVALID_YAML_CONF_ENTRY,
+                       "Address var \"%s\" probably has a sequence(something "
                        "in brackets) value set without any quotes. Please "
-                       "quote it using \"..\".",
-                    seq_node->name);
+                       "quote it using \"..\".", seq_node->name);
             goto error;
         }
 
-        int r = DetectAddressParse2(
-                NULL, gh, ghn, seq_node->val, /* start with negate no */ 0, &var_list, 0);
+        int r = DetectAddressParse2(NULL, gh, ghn, seq_node->val, /* start with negate no */0, &var_list, 0);
 
         CleanVariableResolveList(&var_list);
 
         if (r < 0) {
-            SCLogError("failed to parse address var \"%s\" with value \"%s\". "
-                       "Please check its syntax",
+            SCLogError(SC_ERR_INVALID_YAML_CONF_ENTRY,
+                    "failed to parse address var \"%s\" with value \"%s\". "
+                    "Please check its syntax",
                     seq_node->name, seq_node->val);
             goto error;
         }
 
         if (DetectAddressIsCompleteIPSpace(ghn)) {
-            SCLogError("address var - \"%s\" has the complete IP space negated "
-                       "with its value \"%s\".  Rule address range is NIL. "
-                       "Probably have a !any or an address range that supplies "
-                       "a NULL address range",
+            SCLogError(SC_ERR_INVALID_YAML_CONF_ENTRY,
+                    "address var - \"%s\" has the complete IP space negated "
+                    "with its value \"%s\".  Rule address range is NIL. "
+                    "Probably have a !any or an address range that supplies "
+                    "a NULL address range",
                     seq_node->name, seq_node->val);
             goto error;
         }
 
-        DetectAddressHeadFree(gh);
-        DetectAddressHeadFree(ghn);
-        ghn = NULL;
+        if (gh != NULL) {
+            DetectAddressHeadFree(gh);
+            gh = NULL;
+        }
+        if (ghn != NULL) {
+            DetectAddressHeadFree(ghn);
+            ghn = NULL;
+        }
     }
 
     return 0;
@@ -1309,7 +1324,8 @@ static char DetectAddressMapCompareFunc(void *data1, uint16_t len1, void *data2,
     DetectAddressMap *map1 = (DetectAddressMap *)data1;
     DetectAddressMap *map2 = (DetectAddressMap *)data2;
 
-    char r = (strcmp(map1->string, map2->string) == 0);
+
+    int r = (strcmp(map1->string, map2->string) == 0);
     return r;
 }
 
@@ -1341,30 +1357,26 @@ void DetectAddressMapFree(DetectEngineCtx *de_ctx)
 
     HashListTableFree(de_ctx->address_table);
     de_ctx->address_table = NULL;
+    return;
 }
 
-static bool DetectAddressMapAdd(DetectEngineCtx *de_ctx, const char *string,
-        DetectAddressHead *address, bool contains_negation)
+static int DetectAddressMapAdd(DetectEngineCtx *de_ctx, const char *string,
+                        DetectAddressHead *address, bool contains_negation)
 {
     DetectAddressMap *map = SCCalloc(1, sizeof(*map));
     if (map == NULL)
-        return false;
+        return -1;
 
     map->string = SCStrdup(string);
     if (map->string == NULL) {
         SCFree(map);
-        return false;
+        return -1;
     }
     map->address = address;
     map->contains_negation = contains_negation;
 
-    if (HashListTableAdd(de_ctx->address_table, map, 0) != 0) {
-        SCFree(map->string);
-        SCFree(map);
-        return false;
-    }
-
-    return true;
+    BUG_ON(HashListTableAdd(de_ctx->address_table, (void *)map, 0) != 0);
+    return 0;
 }
 
 static const DetectAddressMap *DetectAddressMapLookup(DetectEngineCtx *de_ctx,
@@ -1407,7 +1419,7 @@ int DetectAddressParse(const DetectEngineCtx *de_ctx,
         return -1;
     }
 
-    int r = DetectAddressParse2(de_ctx, gh, ghn, str, /* start with negate no */ 0, NULL, 0);
+    int r = DetectAddressParse2(de_ctx, gh, ghn, str, /* start with negate no */0, NULL, 0);
     if (r < 0) {
         SCLogDebug("DetectAddressParse2 returned %d", r);
         DetectAddressHeadFree(ghn);
@@ -1457,11 +1469,8 @@ const DetectAddressHead *DetectParseAddress(DetectEngineCtx *de_ctx,
         *contains_negation = false;
     }
 
-    if (!DetectAddressMapAdd((DetectEngineCtx *)de_ctx, string, head, *contains_negation)) {
-        DetectAddressHeadFree(head);
-        return NULL;
-    }
-
+    DetectAddressMapAdd((DetectEngineCtx *)de_ctx, string, head,
+            *contains_negation);
     return head;
 }
 
@@ -1485,6 +1494,8 @@ void DetectAddressHeadCleanup(DetectAddressHead *gh)
             gh->ipv6_head = NULL;
         }
     }
+
+    return;
 }
 
 /**
@@ -1595,9 +1606,10 @@ int DetectAddressMatchIPv4(const DetectMatchAddressIPv4 *addrs,
         SCReturnInt(0);
     }
 
-    uint32_t match_addr = SCNtohl(a->addr_data32[0]);
     for (uint16_t idx = 0; idx < addrs_cnt; idx++) {
-        if (match_addr >= addrs[idx].ip && match_addr <= addrs[idx].ip2) {
+        if (SCNtohl(a->addr_data32[0]) >= addrs[idx].ip &&
+            SCNtohl(a->addr_data32[0]) <= addrs[idx].ip2)
+        {
             SCReturnInt(1);
         }
     }
@@ -1628,12 +1640,6 @@ int DetectAddressMatchIPv6(const DetectMatchAddressIPv6 *addrs,
         SCReturnInt(0);
     }
 
-    uint32_t match_addr[4];
-    match_addr[0] = SCNtohl(a->addr_data32[0]);
-    match_addr[1] = SCNtohl(a->addr_data32[1]);
-    match_addr[2] = SCNtohl(a->addr_data32[2]);
-    match_addr[3] = SCNtohl(a->addr_data32[3]);
-
     /* See if the packet address is within the range of any entry in the
      * signature's address match array.
      */
@@ -1641,10 +1647,18 @@ int DetectAddressMatchIPv6(const DetectMatchAddressIPv6 *addrs,
         uint16_t result1 = 0, result2 = 0;
 
         /* See if packet address equals either limit. Return 1 if true. */
-        if (0 == memcmp(match_addr, addrs[idx].ip, sizeof(match_addr))) {
+        if (SCNtohl(a->addr_data32[0]) == addrs[idx].ip[0] &&
+            SCNtohl(a->addr_data32[1]) == addrs[idx].ip[1] &&
+            SCNtohl(a->addr_data32[2]) == addrs[idx].ip[2] &&
+            SCNtohl(a->addr_data32[3]) == addrs[idx].ip[3])
+        {
             SCReturnInt(1);
         }
-        if (0 == memcmp(match_addr, addrs[idx].ip2, sizeof(match_addr))) {
+        if (SCNtohl(a->addr_data32[0]) == addrs[idx].ip2[0] &&
+            SCNtohl(a->addr_data32[1]) == addrs[idx].ip2[1] &&
+            SCNtohl(a->addr_data32[2]) == addrs[idx].ip2[2] &&
+            SCNtohl(a->addr_data32[3]) == addrs[idx].ip2[3])
+        {
             SCReturnInt(1);
         }
 
@@ -1652,11 +1666,11 @@ int DetectAddressMatchIPv6(const DetectMatchAddressIPv6 *addrs,
          * of the current signature address match pair.
          */
         for (int i = 0; i < 4; i++) {
-            if (match_addr[i] > addrs[idx].ip[i]) {
+            if (SCNtohl(a->addr_data32[i]) > addrs[idx].ip[i]) {
                 result1 = 1;
                 break;
             }
-            if (match_addr[i] < addrs[idx].ip[i]) {
+            if (SCNtohl(a->addr_data32[i]) < addrs[idx].ip[i]) {
                 result1 = 0;
                 break;
             }
@@ -1670,11 +1684,11 @@ int DetectAddressMatchIPv6(const DetectMatchAddressIPv6 *addrs,
          * of the current signature address match pair.
          */
         for (int i = 0; i < 4; i++) {
-            if (match_addr[i] < addrs[idx].ip2[i]) {
+            if (SCNtohl(a->addr_data32[i]) < addrs[idx].ip2[i]) {
                 result2 = 1;
                 break;
             }
-            if (match_addr[i] > addrs[idx].ip2[i]) {
+            if (SCNtohl(a->addr_data32[i]) > addrs[idx].ip2[i]) {
                 result2 = 0;
                 break;
             }
@@ -1694,7 +1708,7 @@ int DetectAddressMatchIPv6(const DetectMatchAddressIPv6 *addrs,
  * \brief Check if a particular address(ipv4 or ipv6) matches the address
  *        range in the DetectAddress instance.
  *
- *        We basically check that the address falls in between the address
+ *        We basically check that the address falls inbetween the address
  *        range in DetectAddress.
  *
  * \param dd Pointer to the DetectAddress instance.
@@ -1749,7 +1763,7 @@ static int DetectAddressMatch(DetectAddress *dd, Address *a)
 #ifdef DEBUG
 /**
  * \brief Prints the address data held by the DetectAddress. If the address
- *        data family is IPv4, we print the ipv4 address and mask, and
+ *        data family is IPv4, we print the the ipv4 address and mask, and
  *        if the address data family is IPv6, we print the ipv6 address and
  *        mask.
  *
@@ -1783,6 +1797,8 @@ static void DetectAddressPrint(DetectAddress *gr)
         SCLogDebug("%s/%s", ip, mask);
 //        printf("%s/%s", ip, mask);
     }
+
+    return;
 }
 #endif
 
@@ -1827,12 +1843,12 @@ DetectAddress *DetectAddressLookupInHead(const DetectAddressHead *gh, Address *a
 
 #ifdef UNITTESTS
 
-static bool UTHValidateDetectAddress(DetectAddress *ad, const char *one, const char *two)
+static int UTHValidateDetectAddress(DetectAddress *ad, const char *one, const char *two)
 {
     char str1[46] = "", str2[46] = "";
 
     if (ad == NULL)
-        return false;
+        return FALSE;
 
     switch(ad->ip.family) {
         case AF_INET:
@@ -1843,15 +1859,15 @@ static bool UTHValidateDetectAddress(DetectAddress *ad, const char *one, const c
 
             if (strcmp(str1, one) != 0) {
                 SCLogInfo("%s != %s", str1, one);
-                return false;
+                return FALSE;
             }
 
             if (strcmp(str2, two) != 0) {
                 SCLogInfo("%s != %s", str2, two);
-                return false;
+                return FALSE;
             }
 
-            return true;
+            return TRUE;
             break;
 
         case AF_INET6:
@@ -1862,19 +1878,19 @@ static bool UTHValidateDetectAddress(DetectAddress *ad, const char *one, const c
 
             if (strcmp(str1, one) != 0) {
                 SCLogInfo("%s != %s", str1, one);
-                return false;
+                return FALSE;
             }
 
             if (strcmp(str2, two) != 0) {
                 SCLogInfo("%s != %s", str2, two);
-                return false;
+                return FALSE;
             }
 
-            return true;
+            return TRUE;
             break;
     }
 
-    return false;
+    return FALSE;
 }
 
 typedef struct UTHValidateDetectAddressHeadRange_ {
@@ -1888,7 +1904,7 @@ static int UTHValidateDetectAddressHead(DetectAddressHead *gh, int nranges, UTHV
     int have = 0;
 
     if (gh == NULL)
-        return false;
+        return FALSE;
 
     DetectAddress *ad = NULL;
     ad = gh->ipv4_head;
@@ -1897,17 +1913,17 @@ static int UTHValidateDetectAddressHead(DetectAddressHead *gh, int nranges, UTHV
     while (have < expect) {
         if (ad == NULL) {
             printf("bad head: have %d ranges, expected %d: ", have, expect);
-            return false;
+            return FALSE;
         }
 
-        if (!UTHValidateDetectAddress(ad, expectations[have].one, expectations[have].two))
-            return false;
+        if (UTHValidateDetectAddress(ad, expectations[have].one, expectations[have].two) == FALSE)
+            return FALSE;
 
         ad = ad->next;
         have++;
     }
 
-    return true;
+    return TRUE;
 }
 
 static int AddressTestParse01(void)
@@ -1955,37 +1971,20 @@ static int AddressTestParse03(void)
 
 static int AddressTestParse04(void)
 {
+    int result = 1;
     DetectAddress *dd = DetectAddressParseSingle("1.2.3.4/255.255.255.0");
-    FAIL_IF_NULL(dd);
 
-    char left[16], right[16];
-    PrintInet(AF_INET, (const void *)&dd->ip.addr_data32[0], left, sizeof(left));
-    PrintInet(AF_INET, (const void *)&dd->ip2.addr_data32[0], right, sizeof(right));
-    SCLogDebug("left %s right %s", left, right);
-    FAIL_IF_NOT(dd->ip.addr_data32[0] == SCNtohl(16909056));
-    FAIL_IF_NOT(dd->ip2.addr_data32[0] == SCNtohl(16909311));
-    FAIL_IF_NOT(strcmp(left, "1.2.3.0") == 0);
-    FAIL_IF_NOT(strcmp(right, "1.2.3.255") == 0);
+    if (dd) {
+        if (dd->ip.addr_data32[0] != SCNtohl(16909056)||
+            dd->ip2.addr_data32[0] != SCNtohl(16909311)) {
+            result = 0;
+        }
 
-    DetectAddressFree(dd);
-    PASS;
-}
+        DetectAddressFree(dd);
+        return result;
+    }
 
-/** \test that address range sets proper start address */
-static int AddressTestParse04bug5081(void)
-{
-    DetectAddress *dd = DetectAddressParseSingle("1.2.3.64/26");
-    FAIL_IF_NULL(dd);
-
-    char left[16], right[16];
-    PrintInet(AF_INET, (const void *)&dd->ip.addr_data32[0], left, sizeof(left));
-    PrintInet(AF_INET, (const void *)&dd->ip2.addr_data32[0], right, sizeof(right));
-    SCLogDebug("left %s right %s", left, right);
-    FAIL_IF_NOT(strcmp(left, "1.2.3.64") == 0);
-    FAIL_IF_NOT(strcmp(right, "1.2.3.127") == 0);
-
-    DetectAddressFree(dd);
-    PASS;
+    return 0;
 }
 
 static int AddressTestParse05(void)
@@ -4115,7 +4114,7 @@ static int AddressTestAddressGroupSetup38(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "![192.168.0.0/16,!192.168.14.0/24]");
         if (r == 1) {
-            if (UTHValidateDetectAddressHead(gh, 3, expectations))
+            if (UTHValidateDetectAddressHead(gh, 3, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4136,7 +4135,7 @@ static int AddressTestAddressGroupSetup39(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "[![192.168.0.0/16,!192.168.14.0/24]]");
         if (r == 1) {
-            if (UTHValidateDetectAddressHead(gh, 3, expectations))
+            if (UTHValidateDetectAddressHead(gh, 3, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4156,7 +4155,7 @@ static int AddressTestAddressGroupSetup40(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "[![192.168.0.0/16,[!192.168.14.0/24]]]");
         if (r == 1) {
-            if (UTHValidateDetectAddressHead(gh, 3, expectations))
+            if (UTHValidateDetectAddressHead(gh, 3, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4176,7 +4175,7 @@ static int AddressTestAddressGroupSetup41(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "[![192.168.0.0/16,![192.168.14.0/24]]]");
         if (r == 1) {
-            if (UTHValidateDetectAddressHead(gh, 3, expectations))
+            if (UTHValidateDetectAddressHead(gh, 3, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4194,7 +4193,7 @@ static int AddressTestAddressGroupSetup42(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "[2001::/3]");
         if (r == 0) {
-            if (UTHValidateDetectAddressHead(gh, 1, expectations))
+            if (UTHValidateDetectAddressHead(gh, 1, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4213,7 +4212,7 @@ static int AddressTestAddressGroupSetup43(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "[2001::/3,!3000::/5]");
         if (r == 1) {
-            if (UTHValidateDetectAddressHead(gh, 2, expectations))
+            if (UTHValidateDetectAddressHead(gh, 2, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4231,7 +4230,7 @@ static int AddressTestAddressGroupSetup44(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "3ffe:ffff:7654:feda:1245:ba98:3210:4562/96");
         if (r == 0) {
-            if (UTHValidateDetectAddressHead(gh, 1, expectations))
+            if (UTHValidateDetectAddressHead(gh, 1, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4267,7 +4266,7 @@ static int AddressTestAddressGroupSetup46(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "[![192.168.0.0/16,![192.168.1.0/24,192.168.3.0/24]]]");
         if (r == 1) {
-            if (UTHValidateDetectAddressHead(gh, 4, expectations))
+            if (UTHValidateDetectAddressHead(gh, 4, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4290,7 +4289,7 @@ static int AddressTestAddressGroupSetup47(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "[![192.168.0.0/16,![192.168.1.0/24,192.168.3.0/24],!192.168.5.0/24]]");
         if (r == 1) {
-            if (UTHValidateDetectAddressHead(gh, 5, expectations))
+            if (UTHValidateDetectAddressHead(gh, 5, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4312,7 +4311,7 @@ static int AddressTestAddressGroupSetup48(void)
     if (gh != NULL) {
         int r = DetectAddressParse(NULL, gh, "[192.168.0.0/16,![192.168.1.0/24,192.168.3.0/24],!192.168.5.0/24]");
         if (r == 1) {
-            if (UTHValidateDetectAddressHead(gh, 4, expectations))
+            if (UTHValidateDetectAddressHead(gh, 4, expectations) == TRUE)
                 result = 1;
         }
 
@@ -4323,23 +4322,28 @@ static int AddressTestAddressGroupSetup48(void)
 
 static int AddressTestCutIPv401(void)
 {
-    DetectAddress *c;
-    DetectAddress *a = DetectAddressParseSingle("1.2.3.0/255.255.255.0");
-    FAIL_IF_NULL(a);
-    DetectAddress *b = DetectAddressParseSingle("1.2.2.0-1.2.3.4");
-    FAIL_IF_NULL(b);
+    DetectAddress *a, *b, *c;
+    a = DetectAddressParseSingle("1.2.3.0/255.255.255.0");
+    b = DetectAddressParseSingle("1.2.2.0-1.2.3.4");
 
-    FAIL_IF(DetectAddressCut(NULL, a, b, &c) == -1);
+    if (DetectAddressCut(NULL, a, b, &c) == -1)
+        goto error;
 
     DetectAddressFree(a);
     DetectAddressFree(b);
     DetectAddressFree(c);
-    PASS;
+    return 1;
+
+error:
+    DetectAddressFree(a);
+    DetectAddressFree(b);
+    DetectAddressFree(c);
+    return 0;
 }
 
 static int AddressTestCutIPv402(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.0/255.255.255.0");
     b = DetectAddressParseSingle("1.2.2.0-1.2.3.4");
 
@@ -4363,7 +4367,7 @@ error:
 
 static int AddressTestCutIPv403(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.0/255.255.255.0");
     b = DetectAddressParseSingle("1.2.2.0-1.2.3.4");
 
@@ -4394,7 +4398,7 @@ error:
 
 static int AddressTestCutIPv404(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.3-1.2.3.6");
     b = DetectAddressParseSingle("1.2.3.0-1.2.3.5");
 
@@ -4426,7 +4430,7 @@ error:
 
 static int AddressTestCutIPv405(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.3-1.2.3.6");
     b = DetectAddressParseSingle("1.2.3.0-1.2.3.9");
 
@@ -4457,7 +4461,7 @@ error:
 
 static int AddressTestCutIPv406(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.0-1.2.3.9");
     b = DetectAddressParseSingle("1.2.3.3-1.2.3.6");
 
@@ -4488,7 +4492,7 @@ error:
 
 static int AddressTestCutIPv407(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.0-1.2.3.6");
     b = DetectAddressParseSingle("1.2.3.0-1.2.3.9");
 
@@ -4517,7 +4521,7 @@ error:
 
 static int AddressTestCutIPv408(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.3-1.2.3.9");
     b = DetectAddressParseSingle("1.2.3.0-1.2.3.9");
 
@@ -4546,7 +4550,7 @@ error:
 
 static int AddressTestCutIPv409(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.0-1.2.3.9");
     b = DetectAddressParseSingle("1.2.3.0-1.2.3.6");
 
@@ -4575,7 +4579,7 @@ error:
 
 static int AddressTestCutIPv410(void)
 {
-    DetectAddress *a, *b, *c = NULL;
+    DetectAddress *a, *b, *c;
     a = DetectAddressParseSingle("1.2.3.0-1.2.3.9");
     b = DetectAddressParseSingle("1.2.3.3-1.2.3.9");
 
@@ -4666,15 +4670,15 @@ static int AddressConfVarsTest01(void)
 
     int result = 0;
 
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
 
     if (DetectAddressTestConfVars() < 0 && DetectPortTestConfVars() < 0)
         result = 1;
 
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
+    ConfDeInit();
+    ConfRestoreContextBackup();
 
     return result;
 }
@@ -4702,15 +4706,15 @@ static int AddressConfVarsTest02(void)
 
     int result = 0;
 
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
 
     if (DetectAddressTestConfVars() == 0 && DetectPortTestConfVars() < 0)
         result = 1;
 
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
+    ConfDeInit();
+    ConfRestoreContextBackup();
 
     return result;
 }
@@ -4738,15 +4742,15 @@ static int AddressConfVarsTest03(void)
 
     int result = 0;
 
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
 
     if (DetectAddressTestConfVars() < 0 && DetectPortTestConfVars() < 0)
         result = 1;
 
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
+    ConfDeInit();
+    ConfRestoreContextBackup();
 
     return result;
 }
@@ -4774,15 +4778,15 @@ static int AddressConfVarsTest04(void)
 
     int result = 0;
 
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
 
     if (DetectAddressTestConfVars() == 0 && DetectPortTestConfVars() == 0)
         result = 1;
 
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
+    ConfDeInit();
+    ConfRestoreContextBackup();
 
     return result;
 }
@@ -4810,9 +4814,9 @@ static int AddressConfVarsTest05(void)
 
     int result = 0;
 
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
 
     if (DetectAddressTestConfVars() != -1 && DetectPortTestConfVars() != -1)
         goto end;
@@ -4820,173 +4824,10 @@ static int AddressConfVarsTest05(void)
     result = 1;
 
  end:
-     SCConfDeInit();
-     SCConfRestoreContextBackup();
+    ConfDeInit();
+    ConfRestoreContextBackup();
 
-     return result;
-}
-
-static int AddressConfVarsTest06(void)
-{
-    // HOME_NET value size = 10261 bytes
-    static const char *dummy_conf_string =
-            "%YAML 1.1\n"
-            "---\n"
-            "\n"
-            "vars:\n"
-            "\n"
-            "  address-groups:\n"
-            "\n"
-            "    HOME_NET: "
-            "\"[2002:0000:3238:DFE1:63:0000:0000:FEFB,2002:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2004:0000:3238:DFE1:63:0000:0000:FEFB,2005:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2006:0000:3238:DFE1:63:0000:0000:FEFB,2007:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB,"
-            "2002:0000:3238:DFE1:63:0000:0000:FEFB,2003:0000:3238:DFE1:63:0000:0000:FEFB]\"\n"
-            "\n"
-            "    EXTERNAL_NET: \"any\"\n"
-            "\n";
-
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
-
-    FAIL_IF(0 != DetectAddressTestConfVars());
-
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
-
-    PASS;
+    return result;
 }
 
 #endif /* UNITTESTS */
@@ -5001,7 +4842,6 @@ void DetectAddressTests(void)
     UtRegisterTest("AddressTestParse02", AddressTestParse02);
     UtRegisterTest("AddressTestParse03", AddressTestParse03);
     UtRegisterTest("AddressTestParse04", AddressTestParse04);
-    UtRegisterTest("AddressTestParse04bug5081", AddressTestParse04bug5081);
     UtRegisterTest("AddressTestParse05", AddressTestParse05);
     UtRegisterTest("AddressTestParse06", AddressTestParse06);
     UtRegisterTest("AddressTestParse07", AddressTestParse07);
@@ -5192,6 +5032,5 @@ void DetectAddressTests(void)
     UtRegisterTest("AddressConfVarsTest03 ", AddressConfVarsTest03);
     UtRegisterTest("AddressConfVarsTest04 ", AddressConfVarsTest04);
     UtRegisterTest("AddressConfVarsTest05 ", AddressConfVarsTest05);
-    UtRegisterTest("AddressConfVarsTest06 ", AddressConfVarsTest06);
 #endif /* UNITTESTS */
 }

@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_FLOW_H
-#define SURICATA_DETECT_FLOW_H
+#ifndef __DETECT_FLOW_H__
+#define __DETECT_FLOW_H__
 
 #define DETECT_FLOW_FLAG_TOSERVER        BIT_U16(0)
 #define DETECT_FLOW_FLAG_TOCLIENT        BIT_U16(1)
@@ -44,4 +44,5 @@ int DetectFlowSetupImplicit(Signature *s, uint32_t flags);
 /* prototypes */
 void DetectFlowRegister (void);
 
-#endif /* SURICATA_DETECT_FLOW_H */
+#endif /* __DETECT_FLOW_H__ */
+

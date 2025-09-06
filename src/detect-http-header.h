@@ -21,11 +21,12 @@
  * \author Pablo Rincon <pablo.rincon.crespo@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_HTTP_HEADER_H
-#define SURICATA_DETECT_HTTP_HEADER_H
+#ifndef __DETECT_HTTP_HEADER_H__
+#define __DETECT_HTTP_HEADER_H__
 
 void DetectHttpHeaderRegister(void);
-void DetectHttpRequestHeaderRegister(void);
-void DetectHttpResponseHeaderRegister(void);
+void DetectHttpRawHeaderRegister(void);
 
-#endif /* SURICATA_DETECT_HTTP_HEADER_H */
+void DetectEngineCleanHHDBuffers(DetectEngineThreadCtx *det_ctx);
+
+#endif /* __DETECT_HTTP_HEADER_H__ */

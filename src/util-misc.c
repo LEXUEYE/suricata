@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2022 Open Information Security Foundation
+/* Copyright (C) 2007-2010 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -28,41 +28,46 @@
 #include "util-unittest.h"
 #include "util-misc.h"
 
-#define PARSE_REGEX "^\\s*(\\d+(?:.\\d+)?)\\s*([a-zA-Z]{2,3})?\\s*$"
-static pcre2_code *parse_regex = NULL;
-static pcre2_match_data *parse_regex_match = NULL;
+#define PARSE_REGEX "^\\s*(\\d+(?:.\\d+)?)\\s*([a-zA-Z]{2})?\\s*$"
+static pcre *parse_regex = NULL;
+static pcre_extra *parse_regex_study = NULL;
 
 void ParseSizeInit(void)
 {
-    int en;
-    PCRE2_SIZE eo;
+    const char *eb = NULL;
+    int eo;
     int opts = 0;
 
-    parse_regex =
-            pcre2_compile((PCRE2_SPTR8)PARSE_REGEX, PCRE2_ZERO_TERMINATED, opts, &en, &eo, NULL);
+    parse_regex = pcre_compile(PARSE_REGEX, opts, &eb, &eo, NULL);
     if (parse_regex == NULL) {
-        PCRE2_UCHAR errbuffer[256];
-        pcre2_get_error_message(en, errbuffer, sizeof(errbuffer));
-        SCLogError("pcre2 compile of \"%s\" failed at "
-                   "offset %d: %s",
-                PARSE_REGEX, (int)eo, errbuffer);
+        SCLogError(SC_ERR_PCRE_COMPILE, "Compile of \"%s\" failed at offset "
+                   "%" PRId32 ": %s", PARSE_REGEX, eo, eb);
         exit(EXIT_FAILURE);
     }
-    parse_regex_match = pcre2_match_data_create_from_pattern(parse_regex, NULL);
+    parse_regex_study = pcre_study(parse_regex, 0, &eb);
+    if (eb != NULL) {
+        SCLogError(SC_ERR_PCRE_STUDY, "pcre study failed: %s", eb);
+        exit(EXIT_FAILURE);
+    }
 }
 
 void ParseSizeDeinit(void)
 {
-    pcre2_code_free(parse_regex);
-    pcre2_match_data_free(parse_regex_match);
+
+    if (parse_regex != NULL)
+        pcre_free(parse_regex);
+    if (parse_regex_study != NULL)
+        pcre_free_study(parse_regex_study);
 }
 
 /* size string parsing API */
 
 static int ParseSizeString(const char *size, double *res)
 {
-    int pcre2_match_ret;
+#define MAX_SUBSTRINGS 30
+    int pcre_exec_ret;
     int r;
+    int ov[MAX_SUBSTRINGS];
     int retval = 0;
     char str[128];
     char str2[128];
@@ -70,27 +75,35 @@ static int ParseSizeString(const char *size, double *res)
     *res = 0;
 
     if (size == NULL) {
-        SCLogError("invalid size argument: NULL. Valid input is <number><unit>. Unit can be "
-                   "kb/KiB, mb/MiB or gb/GiB");
+        SCLogError(SC_ERR_INVALID_ARGUMENTS,"invalid size argument - NULL. Valid size "
+                   "argument should be in the format - \n"
+                   "xxx <- indicates it is just bytes\n"
+                   "xxxkb or xxxKb or xxxKB or xxxkB <- indicates kilobytes\n"
+                   "xxxmb or xxxMb or xxxMB or xxxmB <- indicates megabytes\n"
+                   "xxxgb or xxxGb or xxxGB or xxxgB <- indicates gigabytes.\n"
+			    );
         retval = -2;
         goto end;
     }
 
-    pcre2_match_ret = pcre2_match(
-            parse_regex, (PCRE2_SPTR8)size, strlen(size), 0, 0, parse_regex_match, NULL);
-
-    if (!(pcre2_match_ret == 2 || pcre2_match_ret == 3)) {
-        SCLogError("invalid size argument: '%s'. Valid input is <number><unit>. Unit can be "
-                   "kb/KiB, mb/MiB or gb/GiB",
-                size);
+    pcre_exec_ret = pcre_exec(parse_regex, parse_regex_study, size, strlen(size), 0, 0,
+                    ov, MAX_SUBSTRINGS);
+    if (!(pcre_exec_ret == 2 || pcre_exec_ret == 3)) {
+        SCLogError(SC_ERR_PCRE_MATCH, "invalid size argument - %s. Valid size "
+                   "argument should be in the format - \n"
+                   "xxx <- indicates it is just bytes\n"
+                   "xxxkb or xxxKb or xxxKB or xxxkB <- indicates kilobytes\n"
+                   "xxxmb or xxxMb or xxxMB or xxxmB <- indicates megabytes\n"
+                   "xxxgb or xxxGb or xxxGB or xxxgB <- indicates gigabytes.\n",
+                   size);
         retval = -2;
         goto end;
     }
 
-    size_t copylen = sizeof(str);
-    r = pcre2_substring_copy_bynumber(parse_regex_match, 1, (PCRE2_UCHAR8 *)str, &copylen);
+    r = pcre_copy_substring((char *)size, ov, MAX_SUBSTRINGS, 1,
+                             str, sizeof(str));
     if (r < 0) {
-        SCLogError("pcre2_substring_copy_bynumber failed");
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
         retval = -2;
         goto end;
     }
@@ -99,30 +112,29 @@ static int ParseSizeString(const char *size, double *res)
     errno = 0;
     *res = strtod(str_ptr, &endptr);
     if (errno == ERANGE) {
-        SCLogError("Numeric value out of range");
+        SCLogError(SC_ERR_NUMERIC_VALUE_ERANGE, "Numeric value out of range");
         retval = -1;
         goto end;
     } else if (endptr == str_ptr) {
-        SCLogError("Invalid numeric value");
+        SCLogError(SC_ERR_INVALID_NUMERIC_VALUE, "Invalid numeric value");
         retval = -1;
         goto end;
     }
 
-    if (pcre2_match_ret == 3) {
-        copylen = sizeof(str2);
-        r = pcre2_substring_copy_bynumber(parse_regex_match, 2, (PCRE2_UCHAR8 *)str2, &copylen);
-
+    if (pcre_exec_ret == 3) {
+        r = pcre_copy_substring((char *)size, ov, MAX_SUBSTRINGS, 2,
+                                 str2, sizeof(str2));
         if (r < 0) {
-            SCLogError("pcre2_substring_copy_bynumber failed");
+            SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_copy_substring failed");
             retval = -2;
             goto end;
         }
 
-        if (strcasecmp(str2, "kb") == 0 || strcmp(str2, "KiB") == 0) {
+        if (strcasecmp(str2, "kb") == 0) {
             *res *= 1024;
-        } else if (strcasecmp(str2, "mb") == 0 || strcmp(str2, "MiB") == 0) {
+        } else if (strcasecmp(str2, "mb") == 0) {
             *res *= 1024 * 1024;
-        } else if (strcasecmp(str2, "gb") == 0 || strcmp(str2, "GiB") == 0) {
+        } else if (strcasecmp(str2, "gb") == 0) {
             *res *= 1024 * 1024 * 1024;
         } else {
             /* Bad unit. */
@@ -244,129 +256,227 @@ static int UtilMiscParseSizeStringTest01(void)
 
     str = "10";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10) {
+        goto error;
+    }
 
     str = "10kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10Kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10KB";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10mb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024 * 1024) {
+        goto error;
+    }
 
     str = "10gb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10737418240UL);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10737418240UL) {
+        goto error;
+    }
+
 
     /* space start */
 
     str = " 10";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10) {
+        goto error;
+    }
 
     str = " 10kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10Kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10KB";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10mb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024 * 1024) {
+        goto error;
+    }
 
     str = " 10gb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10737418240);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10737418240) {
+        goto error;
+    }
 
     /* space end */
 
     str = "10 ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10) {
+        goto error;
+    }
 
     str = "10kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10Kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10KB ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10mb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024 * 1024) {
+        goto error;
+    }
 
     str = "10gb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10737418240);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10737418240) {
+        goto error;
+    }
 
     /* space start - space end */
 
     str = " 10 ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10) {
+        goto error;
+    }
 
     str = " 10kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10Kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10KB ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10mb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024 * 1024) {
+        goto error;
+    }
 
     str = " 10gb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10737418240);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10737418240) {
+        goto error;
+    }
+
 
     /* space between number and scale */
 
@@ -374,257 +484,452 @@ static int UtilMiscParseSizeStringTest01(void)
 
     str = "10";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10) {
+        goto error;
+    }
 
     str = "10 kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10 Kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10 KB";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10 mb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024 * 1024) {
+        goto error;
+    }
 
     str = "10 gb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10737418240);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10737418240) {
+        goto error;
+    }
+
 
     /* space start */
 
     str = " 10";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10) {
+        goto error;
+    }
 
     str = " 10 kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10 Kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10 KB";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10 mb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024 * 1024) {
+        goto error;
+    }
 
     str = " 10 gb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10737418240);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10737418240) {
+        goto error;
+    }
 
     /* space end */
 
     str = "10 ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10) {
+        goto error;
+    }
 
     str = "10 kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10 Kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10 KB ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = "10 mb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024 * 1024) {
+        goto error;
+    }
 
     str = "10 gb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10737418240);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10737418240) {
+        goto error;
+    }
 
     /* space start - space end */
 
     str = " 10 ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10) {
+        goto error;
+    }
 
     str = " 10 kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10 Kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10 KB ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024) {
+        goto error;
+    }
 
     str = " 10 mb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10 * 1024 * 1024) {
+        goto error;
+    }
 
     str = " 10 gb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10737418240);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10737418240) {
+        goto error;
+    }
 
     /* no space */
 
     str = "10.5";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5) {
+        goto error;
+    }
 
     str = "10.5kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5Kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5KB";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5mb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024) {
+        goto error;
+    }
 
     str = "10.5gb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024 * 1024) {
+        goto error;
+    }
+
 
     /* space start */
 
     str = " 10.5";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5) {
+        goto error;
+    }
 
     str = " 10.5kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5Kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5KB";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5mb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024) {
+        goto error;
+    }
 
     str = " 10.5gb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024 * 1024) {
+        goto error;
+    }
 
     /* space end */
 
     str = "10.5 ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5) {
+        goto error;
+    }
 
     str = "10.5kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5Kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5KB ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5mb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024) {
+        goto error;
+    }
 
     str = "10.5gb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024 * 1024) {
+        goto error;
+    }
 
     /* space start - space end */
 
     str = " 10.5 ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5) {
+        goto error;
+    }
 
     str = " 10.5kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5Kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5KB ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5mb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024) {
+        goto error;
+    }
 
     str = " 10.5gb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024 * 1024) {
+        goto error;
+    }
+
 
     /* space between number and scale */
 
@@ -632,184 +937,245 @@ static int UtilMiscParseSizeStringTest01(void)
 
     str = "10.5";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5) {
+        goto error;
+    }
 
     str = "10.5 kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5 Kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5 KB";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5 mb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024) {
+        goto error;
+    }
 
     str = "10.5 gb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024 * 1024) {
+        goto error;
+    }
+
 
     /* space start */
 
     str = " 10.5";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5) {
+        goto error;
+    }
 
     str = " 10.5 kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5 Kb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5 KB";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5 mb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024) {
+        goto error;
+    }
 
     str = " 10.5 gb";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024 * 1024) {
+        goto error;
+    }
 
     /* space end */
 
     str = "10.5 ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5) {
+        goto error;
+    }
 
     str = "10.5 kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5 Kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5 KB ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = "10.5 mb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024) {
+        goto error;
+    }
 
     str = "10.5 gb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024 * 1024) {
+        goto error;
+    }
 
     /* space start - space end */
 
     str = " 10.5 ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5) {
+        goto error;
+    }
 
     str = " 10.5 kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5 Kb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5 KB ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024) {
+        goto error;
+    }
 
     str = " 10.5 mb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024) {
+        goto error;
+    }
 
     str = " 10.5 gb ";
     result = 0;
-    FAIL_IF(ParseSizeString(str, &result) != 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
+    if (ParseSizeString(str, &result) > 0) {
+        goto error;
+    }
+    if (result != 10.5 * 1024 * 1024 * 1024) {
+        goto error;
+    }
 
     /* Should fail on unknown units. */
-    FAIL_IF(ParseSizeString("32eb", &result) == 0);
+    if (ParseSizeString("32eb", &result) > 0) {
+        goto error;
+    }
 
-    PASS;
+    return 1;
+ error:
+    return 0;
 }
 
-static int UtilMiscParseSizeStringTest02(void)
-{
-    const char *str;
-    double result;
-
-    str = "10kib";
-    result = 0;
-    FAIL_IF_NOT(ParseSizeString(str, &result) == -1);
-
-    str = "10Kib";
-    result = 0;
-    FAIL_IF_NOT(ParseSizeString(str, &result) == -1);
-
-    str = "10KiB";
-    result = 0;
-    FAIL_IF_NOT(ParseSizeString(str, &result) == 0);
-    FAIL_IF(result != 10 * 1024);
-
-    str = "10mib";
-    result = 0;
-    FAIL_IF_NOT(ParseSizeString(str, &result) == -1);
-
-    str = "10gib";
-    result = 0;
-    FAIL_IF_NOT(ParseSizeString(str, &result) == -1);
-
-    str = " 10.5 KiB ";
-    result = 0;
-    FAIL_IF_NOT(ParseSizeString(str, &result) == 0);
-    FAIL_IF(result != 10.5 * 1024);
-
-    str = " 10.5 MiB ";
-    result = 0;
-    FAIL_IF_NOT(ParseSizeString(str, &result) == 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024);
-
-    str = " 10.5 GiB ";
-    result = 0;
-    FAIL_IF_NOT(ParseSizeString(str, &result) == 0);
-    FAIL_IF(result != 10.5 * 1024 * 1024 * 1024);
-
-    PASS;
-}
+#endif /* UNITTESTS */
 
 void UtilMiscRegisterTests(void)
 {
+#ifdef UNITTESTS
     UtRegisterTest("UtilMiscParseSizeStringTest01",
                    UtilMiscParseSizeStringTest01);
-    UtRegisterTest("UtilMiscParseSizeStringTest02", UtilMiscParseSizeStringTest02);
-}
 #endif /* UNITTESTS */
+
+    return;
+}

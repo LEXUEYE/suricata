@@ -20,8 +20,8 @@
  *  \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_RUNMODE_ERF_DAG_H
-#define SURICATA_RUNMODE_ERF_DAG_H
+#ifndef __RUNMODE_ERF_DAG_H__
+#define __RUNMODE_ERF_DAG_H__
 
 int RunModeIdsErfDagAutoFp(void);
 int RunModeIdsErfDagSingle(void);
@@ -29,4 +29,4 @@ int RunModeIdsErfDagWorkers(void);
 void RunModeErfDagRegister(void);
 const char *RunModeErfDagGetDefaultMode(void);
 
-#endif /* SURICATA_RUNMODE_ERF_DAG_H */
+#endif /* __RUNMODE_ERF_DAG_H__ */

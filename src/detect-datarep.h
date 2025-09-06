@@ -21,8 +21,8 @@
  *  \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_DATAREP_H
-#define SURICATA_DETECT_DATAREP_H
+#ifndef __DETECT_DATAREP_H__
+#define __DETECT_DATAREP_H__
 
 #include "datasets.h"
 #include "datasets-reputation.h"
@@ -47,4 +47,4 @@ int DetectDatarepBufferMatch(DetectEngineThreadCtx *det_ctx,
 /* prototypes */
 void DetectDatarepRegister (void);
 
-#endif /* SURICATA_DETECT_DATAREP_H */
+#endif /* __DETECT_DATAREP_H__ */

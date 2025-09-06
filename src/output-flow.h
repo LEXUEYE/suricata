@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2024 Open Information Security Foundation
+/* Copyright (C) 2007-2013 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -23,43 +23,30 @@
  * Flow Logger Output registration functions
  */
 
-#ifndef SURICATA_OUTPUT_FLOW_H
-#define SURICATA_OUTPUT_FLOW_H
+#ifndef __OUTPUT_FLOW_H__
+#define __OUTPUT_FLOW_H__
 
 #include "decode.h"
-#include "tm-modules.h"
-#include "flow.h"
 
-/**
- * \brief Flow logger function pointer type.
- */
+/** flow logger function pointer type */
 typedef int (*FlowLogger)(ThreadVars *, void *thread_data, Flow *f);
 
-/** \brief Register a flow logger.
- *
- * \param name An informational name for this logger. Used only for
- *     debugging.
- * \param LogFunc A function that will be called to log each flow.
- * \param initdata A pointer to initialization data that will be
- *     passed the ThreadInit.
- * \param ThreadInit Thread initialization callback.
- * \param ThreadDeinit Thread de-initialization callback.
- *
- * \retval 0 on success, -1 on failure.
+/** packet logger condition function pointer type,
+ *  must return true for packets that should be logged
  */
-int SCOutputRegisterFlowLogger(const char *name, FlowLogger LogFunc, void *initdata,
-        ThreadInitFunc ThreadInit, ThreadDeinitFunc ThreadDeinit);
+//typedef int (*TxLogCondition)(ThreadVars *, const Packet *);
 
-/** Internal function: private API. */
+int OutputRegisterFlowLogger(const char *name, FlowLogger LogFunc,
+    OutputCtx *, ThreadInitFunc ThreadInit, ThreadDeinitFunc ThreadDeinit,
+    ThreadExitPrintStatsFunc ThreadExitPrintStats);
+
 void OutputFlowShutdown(void);
 
-/** Internal function: private API. */
+
 TmEcode OutputFlowLog(ThreadVars *tv, void *thread_data, Flow *f);
-
-/** Internal function: private API. */
-TmEcode OutputFlowLogThreadInit(ThreadVars *tv, void **data);
-
-/** Internal function: private API. */
+TmEcode OutputFlowLogThreadInit(ThreadVars *tv, void *initdata, void **data);
 TmEcode OutputFlowLogThreadDeinit(ThreadVars *tv, void *thread_data);
+void OutputFlowLogExitPrintStats(ThreadVars *tv, void *thread_data);
 
-#endif /* SURICATA_OUTPUT_FLOW_H */
+
+#endif /* __OUTPUT_FLOW_H__ */

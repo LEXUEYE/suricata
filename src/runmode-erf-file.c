@@ -38,13 +38,16 @@ const char *RunModeErfFileGetDefaultMode(void)
 
 void RunModeErfFileRegister(void)
 {
-    RunModeRegisterNewRunMode(RUNMODE_ERF_FILE, "single", "Single threaded ERF file mode",
-            RunModeErfFileSingle, NULL);
+    RunModeRegisterNewRunMode(RUNMODE_ERF_FILE, "single",
+        "Single threaded ERF file mode",
+        RunModeErfFileSingle);
 
     RunModeRegisterNewRunMode(RUNMODE_ERF_FILE, "autofp",
-            "Multi threaded ERF file mode.  Packets from "
-            "each flow are assigned to a single detect thread",
-            RunModeErfFileAutoFp, NULL);
+        "Multi threaded ERF file mode.  Packets from "
+        "each flow are assigned to a single detect thread",
+        RunModeErfFileAutoFp);
+
+    return;
 }
 
 int RunModeErfFileSingle(void)
@@ -53,9 +56,11 @@ int RunModeErfFileSingle(void)
 
     SCEnter();
 
-    if (SCConfGet("erf-file.file", &file) == 0) {
-        FatalError("Failed to get erf-file.file from config.");
+    if (ConfGet("erf-file.file", &file) == 0) {
+        FatalError(SC_ERR_FATAL, "Failed to get erf-file.file from config.");
     }
+
+    RunModeInitialize();
 
     TimeModeSetOffline();
 
@@ -86,7 +91,7 @@ int RunModeErfFileSingle(void)
 
     tm_module = TmModuleGetByName("FlowWorker");
     if (tm_module == NULL) {
-        FatalError("TmModuleGetByName for FlowWorker failed");
+        FatalError(SC_ERR_FATAL, "TmModuleGetByName for FlowWorker failed");
     }
     TmSlotSetFuncAppend(tv, tm_module, NULL);
 
@@ -109,9 +114,12 @@ int RunModeErfFileAutoFp(void)
     char *queues = NULL;
     uint16_t thread;
 
+    RunModeInitialize();
+
     const char *file = NULL;
-    if (SCConfGet("erf-file.file", &file) == 0) {
-        FatalError("Failed retrieving erf-file.file from config");
+    if (ConfGet("erf-file.file", &file) == 0) {
+            FatalError(SC_ERR_FATAL,
+                       "Failed retrieving erf-file.file from config");
     }
 
     TimeModeSetOffline();
@@ -135,7 +143,8 @@ int RunModeErfFileAutoFp(void)
 
     queues = RunmodeAutoFpCreatePickupQueuesString(thread_max);
     if (queues == NULL) {
-        FatalError("RunmodeAutoFpCreatePickupQueuesString failed");
+        FatalError(SC_ERR_FATAL,
+                   "RunmodeAutoFpCreatePickupQueuesString failed");
     }
 
     /* create the threads */
@@ -176,8 +185,8 @@ int RunModeErfFileAutoFp(void)
     }
 
     for (thread = 0; thread < (uint16_t)thread_max; thread++) {
-        snprintf(tname, sizeof(tname), "%s#%02d", thread_name_workers, thread + 1);
-        snprintf(qname, sizeof(qname), "pickup%d", thread + 1);
+        snprintf(tname, sizeof(tname), "%s#%02u", thread_name_workers, thread+1);
+        snprintf(qname, sizeof(qname), "pickup%u", thread+1);
 
         SCLogDebug("tname %s, qname %s", tname, qname);
 
@@ -195,12 +204,13 @@ int RunModeErfFileAutoFp(void)
 
         tm_module = TmModuleGetByName("FlowWorker");
         if (tm_module == NULL) {
-            FatalError("TmModuleGetByName for FlowWorker failed");
+            FatalError(SC_ERR_FATAL,
+                       "TmModuleGetByName for FlowWorker failed");
         }
         TmSlotSetFuncAppend(tv_detect_ncpu, tm_module, NULL);
 
         if (threading_set_cpu_affinity) {
-            TmThreadSetCPUAffinity(tv_detect_ncpu, cpu);
+            TmThreadSetCPUAffinity(tv_detect_ncpu, (int)cpu);
             /* If we have more than one core/cpu, the first Detect thread
              * (at cpu 0) will have less priority (higher 'nice' value)
              * In this case we will set the thread priority to +10 (default is 0)

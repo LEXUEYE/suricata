@@ -21,10 +21,10 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DETECT_PKTDATA_H
-#define SURICATA_DETECT_PKTDATA_H
+#ifndef __DETECT_PKTDATA_H__
+#define __DETECT_PKTDATA_H__
 
 /* prototypes */
 void DetectPktDataRegister (void);
 
-#endif /* SURICATA_DETECT_PKTDATA_H */
+#endif /* __DETECT_PKTDATA_H__ */

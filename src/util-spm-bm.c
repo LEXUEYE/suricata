@@ -24,8 +24,8 @@
  *
  * Boyer Moore algorithm has a really good performance. It need two arrays
  * of context for each pattern that hold applicable shifts on the text
- * to search in, based on characters not available in the pattern
- * and combinations of characters that start a suffix of the pattern.
+ * to seach in, based on characters not available in the pattern
+ * and combinations of characters that start a sufix of the pattern.
  * If possible, we should store the context of patterns that we are going
  * to search for multiple times, so we don't spend time on rebuilding them.
  */
@@ -38,7 +38,6 @@
 #include "util-debug.h"
 #include "util-error.h"
 #include "util-memcpy.h"
-#include "util-validate.h"
 
 static int PreBmGs(const uint8_t *x, uint16_t m, uint16_t *bmGs);
 static void PreBmBc(const uint8_t *x, uint16_t m, uint16_t *bmBc);
@@ -68,7 +67,7 @@ void BoyerMooreCtxToNocase(BmCtx *bm_ctx, uint8_t *needle, uint16_t needle_len)
 }
 
 /**
- * \brief Setup a Boyer Moore context.
+ * \brief Setup a Booyer Moore context.
  *
  * \param str pointer to the pattern string
  * \param size length of the string
@@ -79,7 +78,8 @@ BmCtx *BoyerMooreCtxInit(const uint8_t *needle, uint16_t needle_len)
 {
     BmCtx *new = SCMalloc(sizeof(BmCtx) + sizeof(uint16_t) * (needle_len + 1));
     if (unlikely(new == NULL)) {
-        FatalError("Fatal error encountered in BoyerMooreCtxInit. Exiting...");
+        FatalError(SC_ERR_FATAL,
+                   "Fatal error encountered in BoyerMooreCtxInit. Exiting...");
     }
 
     /* Prepare bad chars */
@@ -87,7 +87,8 @@ BmCtx *BoyerMooreCtxInit(const uint8_t *needle, uint16_t needle_len)
 
     /* Prepare good Suffixes */
     if (PreBmGs(needle, needle_len, new->bmGs) == -1) {
-        FatalError("Fatal error encountered in BoyerMoreCtxInit. Exiting...");
+        FatalError(SC_ERR_FATAL,
+                   "Fatal error encountered in BooyerMooreCtxInit. Exiting...");
     }
 
 
@@ -95,7 +96,7 @@ BmCtx *BoyerMooreCtxInit(const uint8_t *needle, uint16_t needle_len)
 }
 
 /**
- * \brief Setup a Boyer Moore context for nocase search
+ * \brief Setup a Booyer Moore context for nocase search
  *
  * \param str pointer to the pattern string
  * \param size length of the string
@@ -112,7 +113,7 @@ BmCtx *BoyerMooreNocaseCtxInit(uint8_t *needle, uint16_t needle_len)
 }
 
 /**
- * \brief Free the memory allocated to Boyer Moore context.
+ * \brief Free the memory allocated to Booyer Moore context.
  *
  * \param bmCtx pointer to the Context for the pattern
  */
@@ -136,7 +137,7 @@ void BoyerMooreCtxDeInit(BmCtx *bmctx)
  */
 static void PreBmBc(const uint8_t *x, uint16_t m, uint16_t *bmBc)
 {
-    uint16_t i;
+    int32_t i;
 
     for (i = 0; i < 256; ++i) {
         bmBc[i] = m;
@@ -167,8 +168,7 @@ static void BoyerMooreSuffixes(const uint8_t *x, uint16_t m, uint16_t *suff)
             f = i;
             while (g >= 0 && x[g] == x[g + m - 1 - f])
                 --g;
-            DEBUG_VALIDATE_BUG_ON(f - g < 0 || f - g > UINT16_MAX);
-            suff[i] = (uint16_t)(f - g);
+            suff[i] = f - g;
         }
     }
 }
@@ -197,10 +197,10 @@ static int PreBmGs(const uint8_t *x, uint16_t m, uint16_t *bmGs)
         if (i == -1 || suff[i] == i + 1)
             for (; j < m - 1 - i; ++j)
                 if (bmGs[j] == m)
-                    bmGs[j] = (uint16_t)(m - 1 - i);
+                    bmGs[j] = m - 1 - i;
 
     for (i = 0; i <= m - 2; ++i)
-        bmGs[m - 1 - suff[i]] = (uint16_t)(m - 1 - i);
+        bmGs[m - 1 - suff[i]] = m - 1 - i;
     return 0;
 }
 
@@ -214,14 +214,14 @@ static int PreBmGs(const uint8_t *x, uint16_t m, uint16_t *bmGs)
  */
 static void PreBmBcNocase(const uint8_t *x, uint16_t m, uint16_t *bmBc)
 {
-    uint16_t i;
+    int32_t i;
 
     for (i = 0; i < 256; ++i) {
         bmBc[i] = m;
     }
     for (i = 0; i < m - 1; ++i) {
-        bmBc[u8_tolower(x[i])] = m - 1 - i;
-        bmBc[u8_toupper(x[i])] = m - 1 - i;
+        bmBc[u8_tolower((unsigned char)x[i])] = m - 1 - i;
+        bmBc[u8_toupper((unsigned char)x[i])] = m - 1 - i;
     }
 }
 
@@ -243,8 +243,7 @@ static void BoyerMooreSuffixesNocase(const uint8_t *x, uint16_t m,
             while (g >= 0 && u8_tolower(x[g]) == u8_tolower(x[g + m - 1 - f])) {
                 --g;
             }
-            DEBUG_VALIDATE_BUG_ON(f - g < 0 || f - g > UINT16_MAX);
-            suff[i] = (uint16_t)(f - g);
+            suff[i] = f - g;
         }
     }
 }
@@ -259,7 +258,7 @@ static void BoyerMooreSuffixesNocase(const uint8_t *x, uint16_t m,
  */
 static void PreBmGsNocase(const uint8_t *x, uint16_t m, uint16_t *bmGs)
 {
-    uint16_t i, j;
+    int32_t i, j;
     uint16_t suff[m + 1];
 
     BoyerMooreSuffixesNocase(x, m, suff);
@@ -268,11 +267,11 @@ static void PreBmGsNocase(const uint8_t *x, uint16_t m, uint16_t *bmGs)
         bmGs[i] = m;
     }
     j = 0;
-    for (i = m; i > 0; --i) {
-        if (suff[i - 1] == i) {
-            for (; j < m - i; ++j) {
+    for (i = m - 1; i >= 0; --i) {
+        if (i == -1 || suff[i] == i + 1) {
+            for (; j < m - 1 - i; ++j) {
                 if (bmGs[j] == m) {
-                    bmGs[j] = m - i;
+                    bmGs[j] = m - 1 - i;
                 }
             }
         }
@@ -297,23 +296,36 @@ static void PreBmGsNocase(const uint8_t *x, uint16_t m, uint16_t *bmGs)
  *
  * \retval ptr to start of the match; NULL if no match
  */
-uint8_t *BoyerMoore(
-        const uint8_t *x, const uint16_t m, const uint8_t *y, const uint32_t n, const BmCtx *bm_ctx)
+uint8_t *BoyerMoore(const uint8_t *x, uint16_t m, const uint8_t *y, uint32_t n, BmCtx *bm_ctx)
 {
-    const uint16_t *bmGs = bm_ctx->bmGs;
-    const uint16_t *bmBc = bm_ctx->bmBc;
+    uint16_t *bmGs = bm_ctx->bmGs;
+    uint16_t *bmBc = bm_ctx->bmBc;
 
     int i, j, m1, m2;
+    int32_t int_n;
+#if 0
+    printf("\nBad:\n");
+    for (i=0;i<ALPHABET_SIZE;i++)
+        printf("%c,%d ", i, bmBc[i]);
+
+    printf("\ngood:\n");
+    for (i=0;i<m;i++)
+        printf("%c, %d ", x[i],bmBc[i]);
+    printf("\n");
+#endif
     // force casting to int32_t (if possible)
-    const int32_t int_n = unlikely(n > INT32_MAX) ? INT32_MAX : n;
+    int_n = unlikely(n > INT32_MAX) ? INT32_MAX : n;
     j = 0;
     while (j <= int_n - m ) {
         for (i = m - 1; i >= 0 && x[i] == y[i + j]; --i);
 
         if (i < 0) {
             return (uint8_t *)(y + j);
+            //j += bmGs[0];
         } else {
-            j += (m1 = bmGs[i]) > (m2 = bmBc[y[i + j]] - m + 1 + i) ? m1 : m2;
+//          printf("%c", y[i+j]);
+            j += (m1 = bmGs[i]) > (m2 = bmBc[y[i + j]] - m + 1 + i)? m1: m2;
+//          printf("%d, %d\n", m1, m2);
         }
     }
     return NULL;
@@ -335,14 +347,24 @@ uint8_t *BoyerMoore(
  *
  * \retval ptr to start of the match; NULL if no match
  */
-uint8_t *BoyerMooreNocase(
-        const uint8_t *x, const uint16_t m, const uint8_t *y, const uint32_t n, const BmCtx *bm_ctx)
+uint8_t *BoyerMooreNocase(const uint8_t *x, uint16_t m, const uint8_t *y, uint32_t n, BmCtx *bm_ctx)
 {
-    const uint16_t *bmGs = bm_ctx->bmGs;
-    const uint16_t *bmBc = bm_ctx->bmBc;
+    uint16_t *bmGs = bm_ctx->bmGs;
+    uint16_t *bmBc = bm_ctx->bmBc;
     int i, j, m1, m2;
+    int32_t int_n;
+#if 0
+    printf("\nBad:\n");
+    for (i=0;i<ALPHABET_SIZE;i++)
+        printf("%c,%d ", i, bmBc[i]);
+
+    printf("\ngood:\n");
+    for (i=0;i<m;i++)
+        printf("%c, %d ", x[i],bmBc[i]);
+    printf("\n");
+#endif
     // force casting to int32_t (if possible)
-    const int32_t int_n = unlikely(n > INT32_MAX) ? INT32_MAX : n;
+    int_n = unlikely(n > INT32_MAX) ? INT32_MAX : n;
     j = 0;
     while (j <= int_n - m ) {
          /* x is stored in lowercase. */
@@ -351,7 +373,8 @@ uint8_t *BoyerMooreNocase(
         if (i < 0) {
             return (uint8_t *)(y + j);
         } else {
-            j += (m1 = bmGs[i]) > (m2 = bmBc[y[i + j]] - m + 1 + i) ? m1 : m2;
+            j += (m1 = bmGs[i]) > (m2 = bmBc[y[i + j]] - m + 1 + i)?
+                m1: m2;
         }
     }
     return NULL;
@@ -367,19 +390,21 @@ typedef struct SpmBmCtx_ {
 static SpmCtx *BMInitCtx(const uint8_t *needle, uint16_t needle_len, int nocase,
                          SpmGlobalThreadCtx *global_thread_ctx)
 {
-    SpmCtx *ctx = SCCalloc(1, sizeof(SpmCtx));
+    SpmCtx *ctx = SCMalloc(sizeof(SpmCtx));
     if (ctx == NULL) {
         SCLogDebug("Unable to alloc SpmCtx.");
         return NULL;
     }
+    memset(ctx, 0, sizeof(*ctx));
     ctx->matcher = SPM_BM;
 
-    SpmBmCtx *sctx = SCCalloc(1, sizeof(SpmBmCtx));
+    SpmBmCtx *sctx = SCMalloc(sizeof(SpmBmCtx));
     if (sctx == NULL) {
         SCLogDebug("Unable to alloc SpmBmCtx.");
         SCFree(ctx);
         return NULL;
     }
+    memset(sctx, 0, sizeof(*sctx));
 
     sctx->needle = SCMalloc(needle_len);
     if (sctx->needle == NULL) {
@@ -437,11 +462,12 @@ static uint8_t *BMScan(const SpmCtx *ctx, SpmThreadCtx *thread_ctx,
 
 static SpmGlobalThreadCtx *BMInitGlobalThreadCtx(void)
 {
-    SpmGlobalThreadCtx *global_thread_ctx = SCCalloc(1, sizeof(SpmGlobalThreadCtx));
+    SpmGlobalThreadCtx *global_thread_ctx = SCMalloc(sizeof(SpmGlobalThreadCtx));
     if (global_thread_ctx == NULL) {
         SCLogDebug("Unable to alloc SpmThreadCtx.");
         return NULL;
     }
+    memset(global_thread_ctx, 0, sizeof(*global_thread_ctx));
     global_thread_ctx->matcher = SPM_BM;
     return global_thread_ctx;
 }
@@ -463,11 +489,12 @@ static void BMDestroyThreadCtx(SpmThreadCtx *thread_ctx)
 }
 
 static SpmThreadCtx *BMMakeThreadCtx(const SpmGlobalThreadCtx *global_thread_ctx) {
-    SpmThreadCtx *thread_ctx = SCCalloc(1, sizeof(SpmThreadCtx));
+    SpmThreadCtx *thread_ctx = SCMalloc(sizeof(SpmThreadCtx));
     if (thread_ctx == NULL) {
         SCLogDebug("Unable to alloc SpmThreadCtx.");
         return NULL;
     }
+    memset(thread_ctx, 0, sizeof(*thread_ctx));
     thread_ctx->matcher = SPM_BM;
     return thread_ctx;
 }

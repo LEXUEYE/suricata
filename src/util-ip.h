@@ -22,11 +22,8 @@
  * \author Duarte Silva <duarte.silva@serializing.me>
  */
 
-#ifndef SURICATA_UTIL_IP_H
-#define SURICATA_UTIL_IP_H
-
-#define SC_IPV4_LEN 4
-#define SC_IPV6_LEN 16
+#ifndef __UTIL_IP_H__
+#define __UTIL_IP_H__
 
 bool IPv4AddressStringIsValid(const char *str);
 bool IPv6AddressStringIsValid(const char *str);
@@ -34,4 +31,4 @@ struct in_addr *ValidateIPV4Address(const char *);
 struct in6_addr *ValidateIPV6Address(const char *);
 void MaskIPNetblock(uint8_t *, int, int);
 
-#endif /* SURICATA_UTIL_IP_H */
+#endif /* __UTIL_IP_H__ */

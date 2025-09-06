@@ -21,9 +21,11 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_DCE_OPNUM_H
-#define SURICATA_DETECT_DCE_OPNUM_H
+#ifndef __DETECT_DCE_OPNUM_H__
+#define __DETECT_DCE_OPNUM_H__
+
+#include "app-layer-dcerpc-common.h"
 
 void DetectDceOpnumRegister(void);
 
-#endif /* SURICATA_DETECT_DCE_OPNUM_H */
+#endif /* __DETECT_DCE_OPNUM_H__ */

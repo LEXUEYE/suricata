@@ -97,10 +97,9 @@ const char *SCRuleVarsGetConfVar(const DetectEngineCtx *de_ctx,
         }
     }
 
-    if (SCConfGet(conf_var_full_name, &conf_var_full_name_value) != 1) {
-        SCLogError("Variable \"%s\" is not defined in "
-                   "configuration file",
-                conf_var_name);
+    if (ConfGet(conf_var_full_name, &conf_var_full_name_value) != 1) {
+        SCLogError(SC_ERR_UNDEFINED_VAR, "Variable \"%s\" is not defined in "
+                                         "configuration file", conf_var_name);
         goto end;
     }
 
@@ -187,60 +186,62 @@ static const char *dummy_conf_string =
  */
 static int SCRuleVarsPositiveTest01(void)
 {
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+    int result = 1;
+
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
 
     /* check for address-groups */
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$HOME_NET", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$HOME_NET", SC_RULE_VARS_ADDRESS_GROUPS),
-                        "[192.168.0.0/16,10.8.0.0/16,127.0.0.1,2001:888:13c5:"
-                        "5AFE::/64,2001:888:13c5:CAFE::/64]") == 0);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$EXTERNAL_NET", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$EXTERNAL_NET", SC_RULE_VARS_ADDRESS_GROUPS),
-                        "[!192.168.0.0/16,2000::/3]") == 0);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$HTTP_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$HTTP_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
-                        "!192.168.0.0/16") == 0);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$SMTP_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$SMTP_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
-                        "!192.168.0.0/16") == 0);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$SQL_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$SQL_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
-                        "!192.168.0.0/16") == 0);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$DNS_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$DNS_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
-                        "any") == 0);
-    FAIL_IF_NOT(
-            SCRuleVarsGetConfVar(NULL, "$TELNET_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-            strcmp(SCRuleVarsGetConfVar(NULL, "$TELNET_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
-                    "any") == 0);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$AIM_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$AIM_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
-                        "any") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$HOME_NET", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$HOME_NET", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "[192.168.0.0/16,10.8.0.0/16,127.0.0.1,2001:888:13c5:"
+                      "5AFE::/64,2001:888:13c5:CAFE::/64]") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$EXTERNAL_NET", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$EXTERNAL_NET", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "[!192.168.0.0/16,2000::/3]") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$HTTP_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$HTTP_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "!192.168.0.0/16") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$SMTP_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$SMTP_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "!192.168.0.0/16") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$SQL_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$SQL_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "!192.168.0.0/16") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$DNS_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$DNS_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "any") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$TELNET_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$TELNET_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "any") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$AIM_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$AIM_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "any") == 0);
 
     /* Test that a leading space is stripped. */
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, " $AIM_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, " $AIM_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
-                        "any") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL," $AIM_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL," $AIM_SERVERS", SC_RULE_VARS_ADDRESS_GROUPS),
+                      "any") == 0);
 
     /* check for port-groups */
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$HTTP_PORTS", SC_RULE_VARS_PORT_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$HTTP_PORTS", SC_RULE_VARS_PORT_GROUPS),
-                        "80:81,88") == 0);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$SHELLCODE_PORTS", SC_RULE_VARS_PORT_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$SHELLCODE_PORTS", SC_RULE_VARS_PORT_GROUPS),
-                        "80") == 0);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$ORACLE_PORTS", SC_RULE_VARS_PORT_GROUPS) != NULL &&
-                strcmp(SCRuleVarsGetConfVar(NULL, "$ORACLE_PORTS", SC_RULE_VARS_PORT_GROUPS),
-                        "1521") == 0);
-    FAIL_IF_NOT(
-            SCRuleVarsGetConfVar(NULL, "$SSH_PORTS", SC_RULE_VARS_PORT_GROUPS) != NULL &&
-            strcmp(SCRuleVarsGetConfVar(NULL, "$SSH_PORTS", SC_RULE_VARS_PORT_GROUPS), "22") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$HTTP_PORTS", SC_RULE_VARS_PORT_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$HTTP_PORTS", SC_RULE_VARS_PORT_GROUPS),
+                      "80:81,88") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$SHELLCODE_PORTS", SC_RULE_VARS_PORT_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$SHELLCODE_PORTS", SC_RULE_VARS_PORT_GROUPS),
+                      "80") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$ORACLE_PORTS", SC_RULE_VARS_PORT_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$ORACLE_PORTS", SC_RULE_VARS_PORT_GROUPS),
+                      "1521") == 0);
+    result &= (SCRuleVarsGetConfVar(NULL,"$SSH_PORTS", SC_RULE_VARS_PORT_GROUPS) != NULL &&
+               strcmp(SCRuleVarsGetConfVar(NULL,"$SSH_PORTS", SC_RULE_VARS_PORT_GROUPS),
+                      "22") == 0);
 
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
-    PASS;
+    ConfDeInit();
+    ConfRestoreContextBackup();
+
+    return result;
 }
 
 /**
@@ -249,18 +250,22 @@ static int SCRuleVarsPositiveTest01(void)
  */
 static int SCRuleVarsNegativeTest02(void)
 {
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+    int result = 1;
 
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$HOME_NETW", SC_RULE_VARS_ADDRESS_GROUPS) == NULL);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$home_net", SC_RULE_VARS_ADDRESS_GROUPS) == NULL);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$TOMCAT_PORTSW", SC_RULE_VARS_PORT_GROUPS) == NULL);
-    FAIL_IF_NOT(SCRuleVarsGetConfVar(NULL, "$tomcat_ports", SC_RULE_VARS_PORT_GROUPS) == NULL);
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
 
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
-    PASS;
+    result &= (SCRuleVarsGetConfVar(NULL,"$HOME_NETW", SC_RULE_VARS_ADDRESS_GROUPS) == NULL);
+    result &= (SCRuleVarsGetConfVar(NULL,"$home_net", SC_RULE_VARS_ADDRESS_GROUPS) == NULL);
+
+    result &= (SCRuleVarsGetConfVar(NULL,"$TOMCAT_PORTSW", SC_RULE_VARS_PORT_GROUPS) == NULL);
+    result &= (SCRuleVarsGetConfVar(NULL,"$tomcat_ports", SC_RULE_VARS_PORT_GROUPS) == NULL);
+
+    ConfDeInit();
+    ConfRestoreContextBackup();
+
+    return result;
 }
 
 /**
@@ -269,55 +274,170 @@ static int SCRuleVarsNegativeTest02(void)
  */
 static int SCRuleVarsPositiveTest03(void)
 {
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+    int result = 0;
+    Signature *s = NULL;
+    DetectEngineCtx *de_ctx = NULL;
 
-    DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+
+    if ( (de_ctx = DetectEngineCtxInit()) == NULL)
+        goto end;
     de_ctx->flags |= DE_QUIET;
+/*
+    s = SigInit(de_ctx, "alert tcp $HTTP_SERVERS any -> any any (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
 
-    Signature *s = DetectEngineAppendSig(de_ctx,
-            "alert tcp [$HTTP_SERVERS,$HOME_NET,192.168.2.5] $HTTP_PORTS -> $EXTERNAL_NET "
-            "[80,[!$HTTP_PORTS,$ORACLE_PORTS]] (msg:\"Rule Vars Test\"; sid:1;)");
-    FAIL_IF_NULL(s);
+    s = SigInit(de_ctx, "alert tcp $SMTP_SERVERS any -> $HTTP_SERVERS any (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
 
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
-    DetectEngineCtxFree(de_ctx);
-    PASS;
+    s = SigInit(de_ctx, "alert tcp $AIM_SERVERS any -> $AIM_SERVERS any (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp $TELNET_SERVERS any -> any $SSH_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp $TELNET_SERVERS any -> any !$SSH_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp $TELNET_SERVERS 80 -> any !$SSH_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp $TELNET_SERVERS !80 -> any !$SSH_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp !$HTTP_SERVERS !80 -> any !$SSH_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp 192.168.1.2 any -> any $HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp !192.168.1.2 any -> any $HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp !192.168.1.2 any -> any !$HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp !192.168.1.2 any -> !$HTTP_SERVERS !$HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp !192.168.1.2 $HTTP_PORTS -> !$HTTP_SERVERS !$HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp [!192.168.24.0/23,!167.12.0.0/24] any -> any $HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp ![192.168.24.0/23,!167.12.0.0/24] any -> any $HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp [$HOME_NET,!192.168.1.2] $HTTP_PORTS -> !$HTTP_SERVERS !$HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp [[192.168.1.3,$EXTERNAL_NET],192.168.2.5] $HTTP_PORTS -> !$HTTP_SERVERS !$HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+
+    s = SigInit(de_ctx, "alert tcp [[192.168.1.3,$EXTERNAL_NET],192.168.2.5] $HTTP_PORTS -> !$HTTP_SERVERS [80,[!$HTTP_PORTS,$ORACLE_PORTS]] (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(s);
+*/
+    s = SigInit(de_ctx, "alert tcp [$HTTP_SERVERS,$HOME_NET,192.168.2.5] $HTTP_PORTS -> $EXTERNAL_NET [80,[!$HTTP_PORTS,$ORACLE_PORTS]] (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s == NULL)
+        goto end;
+    SigFree(de_ctx, s);
+
+    result = 1;
+
+end:
+    ConfDeInit();
+    ConfRestoreContextBackup();
+
+    if (de_ctx != NULL)
+        DetectEngineCtxFree(de_ctx);
+    return result;
 }
 
 /**
  * \test Check that Signatures with invalid address and port groups, are
- *       are invalidated by the Signature parsing API.
+ *       are invalidated by the Singature parsing API.
  */
 static int SCRuleVarsNegativeTest04(void)
 {
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
-    DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    int result = 0;
+    Signature *s = NULL;
+    DetectEngineCtx *de_ctx = NULL;
+
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_conf_string, strlen(dummy_conf_string));
+
+    if ( (de_ctx = DetectEngineCtxInit()) == NULL)
+        goto end;
     de_ctx->flags |= DE_QUIET;
 
-    Signature *s = DetectEngineAppendSig(
-            de_ctx, "alert tcp $HTTP_SERVER any -> any any (msg:\"Rule Vars Test\"; sid:1;)");
-    FAIL_IF_NOT_NULL(s);
-    s = DetectEngineAppendSig(
-            de_ctx, "alert tcp $http_servers any -> any any (msg:\"Rule Vars Test\"; sid:1;)");
-    FAIL_IF_NOT_NULL(s);
-    s = DetectEngineAppendSig(de_ctx,
-            "alert tcp $http_servers any -> any $HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
-    FAIL_IF_NOT_NULL(s);
-    s = DetectEngineAppendSig(de_ctx,
-            "alert tcp !$TELNET_SERVERS !80 -> any !$SSH_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
-    FAIL_IF_NOT_NULL(s);
+    s = SigInit(de_ctx, "alert tcp $HTTP_SERVER any -> any any (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s != NULL)
+        goto end;
 
-    DetectEngineCtxFree(de_ctx);
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
-    PASS;
+    s = SigInit(de_ctx, "alert tcp $http_servers any -> any any (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s != NULL)
+        goto end;
+    SigFree(de_ctx, s);
+
+    s = SigInit(de_ctx, "alert tcp $http_servers any -> any $HTTP_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s != NULL)
+        goto end;
+    SigFree(de_ctx, s);
+
+    s = SigInit(de_ctx, "alert tcp !$TELNET_SERVERS !80 -> any !$SSH_PORTS (msg:\"Rule Vars Test\"; sid:1;)");
+    if (s != NULL)
+        goto end;
+    SigFree(de_ctx, s);
+
+    result = 1;
+
+end:
+    ConfDeInit();
+    ConfRestoreContextBackup();
+
+    if (de_ctx != NULL)
+        DetectEngineCtxFree(de_ctx);
+    return result;
 }
 
 static const char *dummy_mt_conf_string =
@@ -350,9 +470,9 @@ static int SCRuleVarsMTest01(void)
     int result = 0;
     DetectEngineCtx *de_ctx = NULL;
 
-    SCConfCreateContextBackup();
-    SCConfInit();
-    SCConfYamlLoadString(dummy_mt_conf_string, strlen(dummy_mt_conf_string));
+    ConfCreateContextBackup();
+    ConfInit();
+    ConfYamlLoadString(dummy_mt_conf_string, strlen(dummy_mt_conf_string));
 
     if ( (de_ctx = DetectEngineCtxInit()) == NULL)
         return 0;
@@ -387,8 +507,8 @@ static int SCRuleVarsMTest01(void)
         goto end;
 
 end:
-    SCConfDeInit();
-    SCConfRestoreContextBackup();
+    ConfDeInit();
+    ConfRestoreContextBackup();
 
     if (de_ctx != NULL)
         DetectEngineCtxFree(de_ctx);
@@ -407,4 +527,6 @@ void SCRuleVarsRegisterTests(void)
 
     UtRegisterTest("SCRuleVarsMTest01", SCRuleVarsMTest01);
 #endif
+
+    return;
 }

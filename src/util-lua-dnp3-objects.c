@@ -27,9 +27,11 @@
 #include "app-layer-dnp3.h"
 #include "app-layer-dnp3-objects.h"
 
-#include "lua.h"
-#include "lualib.h"
-#include "lauxlib.h"
+#ifdef HAVE_LUA
+
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
 
 #include "util-lua.h"
 #include "util-lua-dnp3-objects.h"
@@ -3537,3 +3539,5 @@ void DNP3PushPoint(lua_State *luastate, DNP3Object *object,
             break;
     }
 }
+
+#endif /* HAVE_LUA */

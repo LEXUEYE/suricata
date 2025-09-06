@@ -23,10 +23,10 @@
  * \author Gerardo Iglesias <iglesiasg@gmail.com>
  */
 
-#ifndef SURICATA_DETECT_ICODE_H
-#define SURICATA_DETECT_ICODE_H
+#ifndef __DETECT_ICODE_H__
+#define __DETECT_ICODE_H__
 
 /* prototypes */
 void DetectICodeRegister(void);
 
-#endif /* SURICATA_DETECT_ICODE_H */
+#endif /* __DETECT_ICODE_H__ */

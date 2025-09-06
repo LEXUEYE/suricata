@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_SOURCE_PCAP_FILE_H
-#define SURICATA_SOURCE_PCAP_FILE_H
+#ifndef __SOURCE_PCAP_FILE_H__
+#define __SOURCE_PCAP_FILE_H__
 
 void TmModuleReceivePcapFileRegister (void);
 void TmModuleDecodePcapFileRegister (void);
@@ -30,5 +30,7 @@ void TmModuleDecodePcapFileRegister (void);
 void PcapIncreaseInvalidChecksum(void);
 
 void PcapFileGlobalInit(void);
+const char *PcapFileGetFilename(void);
 
-#endif /* SURICATA_SOURCE_PCAP_FILE_H */
+#endif /* __SOURCE_PCAP_FILE_H__ */
+

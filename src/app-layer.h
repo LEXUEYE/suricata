@@ -16,16 +16,12 @@
  */
 
 /**
- * \file
- *
  * \author Victor Julien <victor@inliniac.net>
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
- *
- *  Application layer handling and protocols implementation
  */
 
-#ifndef SURICATA_APP_LAYER_H
-#define SURICATA_APP_LAYER_H
+#ifndef __APP_LAYER_H__
+#define __APP_LAYER_H__
 
 #include "threadvars.h"
 #include "decode.h"
@@ -33,9 +29,9 @@
 
 #include "stream-tcp-private.h"
 #include "stream-tcp-reassemble.h"
+#include "stream.h"
 
-
-#include "rust.h"
+#include "util-profiling.h"
 
 #define APP_LAYER_DATA_ALREADY_SENT_TO_APP_LAYER \
     (~STREAM_TOSERVER & ~STREAM_TOCLIENT)
@@ -45,9 +41,11 @@
 /**
  * \brief Handles reassembled tcp stream.
  */
-int AppLayerHandleTCPData(ThreadVars *tv, TcpReassemblyThreadCtx *ra_ctx, Packet *p, Flow *f,
-        TcpSession *ssn, TcpStream **stream, uint8_t *data, uint32_t data_len, uint8_t flags,
-        enum StreamUpdateDir dir);
+int AppLayerHandleTCPData(ThreadVars *tv, TcpReassemblyThreadCtx *ra_ctx,
+                          Packet *p, Flow *f,
+                          TcpSession *ssn, TcpStream **stream,
+                          uint8_t *data, uint32_t data_len,
+                          uint8_t flags);
 
 /**
  * \brief Handles an udp chunk.
@@ -63,7 +61,7 @@ int AppLayerHandleUdp(ThreadVars *tv, AppLayerThreadCtx *app_tctx,
  *
  * \param The internal protocol id.
  */
-AppProto AppLayerGetProtoByName(const char *alproto_name);
+AppProto AppLayerGetProtoByName(char *alproto_name);
 
 /**
  * \brief Given the internal protocol id, returns a string representation
@@ -102,10 +100,10 @@ int AppLayerDeSetup(void);
  * \retval Pointer to the newly create thread context, on success;
  *         NULL, on failure.
  */
-AppLayerThreadCtx *AppLayerGetCtxThread(void);
+AppLayerThreadCtx *AppLayerGetCtxThread(ThreadVars *tv);
 
 /**
- * \brief Destroys the context created by AppLayerGetCtxThread().
+ * \brief Destroys the context created by AppLayeGetCtxThread().
  *
  * \param tctx Pointer to the thread context to destroy.
  */
@@ -121,15 +119,21 @@ void AppLayerRegisterThreadCounters(ThreadVars *tv);
 
 void AppLayerProfilingResetInternal(AppLayerThreadCtx *app_tctx);
 
+static inline void AppLayerProfilingReset(AppLayerThreadCtx *app_tctx)
+{
+#ifdef PROFILING
+    AppLayerProfilingResetInternal(app_tctx);
+#endif
+}
+
 void AppLayerProfilingStoreInternal(AppLayerThreadCtx *app_tctx, Packet *p);
 
+static inline void AppLayerProfilingStore(AppLayerThreadCtx *app_tctx, Packet *p)
+{
 #ifdef PROFILING
-#define AppLayerProfilingReset(app_tctx)    AppLayerProfilingResetInternal(app_tctx)
-#define AppLayerProfilingStore(app_tctx, p) AppLayerProfilingStoreInternal(app_tctx, p)
-#else
-#define AppLayerProfilingReset(app_tctx)
-#define AppLayerProfilingStore(app_tctx, p)
+    AppLayerProfilingStoreInternal(app_tctx, p);
 #endif
+}
 
 void AppLayerRegisterGlobalCounters(void);
 
@@ -140,19 +144,5 @@ void AppLayerUnittestsRegister(void);
 #endif
 
 void AppLayerIncTxCounter(ThreadVars *tv, Flow *f, uint64_t step);
-void AppLayerIncGapErrorCounter(ThreadVars *tv, Flow *f);
-void AppLayerIncAllocErrorCounter(ThreadVars *tv, Flow *f);
-void AppLayerIncParserErrorCounter(ThreadVars *tv, Flow *f);
-void AppLayerIncInternalErrorCounter(ThreadVars *tv, Flow *f);
-
-static inline const uint8_t *StreamSliceGetData(const StreamSlice *stream_slice)
-{
-    return stream_slice->input;
-}
-
-static inline uint32_t StreamSliceGetDataLen(const StreamSlice *stream_slice)
-{
-    return stream_slice->input_len;
-}
 
 #endif

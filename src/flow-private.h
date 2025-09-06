@@ -21,8 +21,8 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_FLOW_PRIVATE_H
-#define SURICATA_FLOW_PRIVATE_H
+#ifndef __FLOW_PRIVATE_H__
+#define __FLOW_PRIVATE_H__
 
 #include "flow-hash.h"
 #include "flow-queue.h"
@@ -38,7 +38,8 @@
 
 /* Flow Time out values */
 #define FLOW_DEFAULT_NEW_TIMEOUT 30
-#define FLOW_DEFAULT_EST_TIMEOUT           300
+#define FLOW_DEFAULT_EST_TIMEOUT 300
+#define FLOW_DEFAULT_CLOSED_TIMEOUT 0
 #define FLOW_DEFAULT_BYPASSED_TIMEOUT 100
 #define FLOW_IPPROTO_TCP_NEW_TIMEOUT 30
 #define FLOW_IPPROTO_TCP_EST_TIMEOUT 300
@@ -52,7 +53,8 @@
 #define FLOW_IPPROTO_ICMP_BYPASSED_TIMEOUT 100
 
 #define FLOW_DEFAULT_EMERG_NEW_TIMEOUT 10
-#define FLOW_DEFAULT_EMERG_EST_TIMEOUT        100
+#define FLOW_DEFAULT_EMERG_EST_TIMEOUT 100
+#define FLOW_DEFAULT_EMERG_CLOSED_TIMEOUT 0
 #define FLOW_DEFAULT_EMERG_BYPASSED_TIMEOUT 50
 #define FLOW_IPPROTO_TCP_EMERG_NEW_TIMEOUT 10
 #define FLOW_IPPROTO_TCP_EMERG_EST_TIMEOUT 100
@@ -74,7 +76,7 @@ enum {
     FLOW_PROTO_MAX,
 };
 /* max used in app-layer (counters) */
-#define FLOW_PROTO_APPLAYER_MAX (FLOW_PROTO_UDP + 1)
+#define FLOW_PROTO_APPLAYER_MAX FLOW_PROTO_UDP + 1
 
 /*
  * Variables
@@ -178,4 +180,4 @@ static inline uint32_t FlowGetTimeoutPolicy(const Flow *f)
     }
     return timeout;
 }
-#endif /* SURICATA_FLOW_PRIVATE_H */
+#endif /* __FLOW_PRIVATE_H__ */

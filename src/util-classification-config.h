@@ -21,8 +21,8 @@
  * \author Anoop Saldanha <anoopsaldanha@gmail.com>
  */
 
-#ifndef SURICATA_UTIL_CLASSIFICATION_CONFIG_H
-#define SURICATA_UTIL_CLASSIFICATION_CONFIG_H
+#ifndef __UTIL_CLASSIFICATION_CONFIG_H__
+#define __UTIL_CLASSIFICATION_CONFIG_H__
 
 #define CLASSTYPE_NAME_MAX_LEN 64
 #define CLASSTYPE_DESC_MAX_LEN 512
@@ -31,7 +31,7 @@
  * \brief Container for a Classtype from the Classification.config file.
  */
 typedef struct SCClassConfClasstype_ {
-    /* The index of the classification within classification.config */
+    /* The index of the classification within classification.confg */
     uint16_t classtype_id;
 
     /* The priority this classification type carries */
@@ -45,21 +45,21 @@ typedef struct SCClassConfClasstype_ {
     char *classtype_desc;
 } SCClassConfClasstype;
 
-bool SCClassConfLoadClassificationConfigFile(DetectEngineCtx *, FILE *fd);
+void SCClassConfLoadClassficationConfigFile(DetectEngineCtx *, FILE *fd);
 int SCClassConfAddClasstype(DetectEngineCtx *de_ctx, char *rawstr, uint16_t index);
 SCClassConfClasstype *SCClassConfGetClasstype(const char *,
                                               DetectEngineCtx *);
 void SCClassConfDeInitContext(DetectEngineCtx *);
 
-void SCClassSCConfInit(DetectEngineCtx *de_ctx);
-void SCClassConfDeinit(DetectEngineCtx *de_ctx);
+void SCClassConfInit(void);
+void SCClassConfDeinit(void);
 
 /* for unittests */
 #ifdef UNITTESTS
 void SCClassConfRegisterTests(void);
 FILE *SCClassConfGenerateValidDummyClassConfigFD01(void);
-FILE *SCClassConfGenerateInvalidDummyClassConfigFD02(void);
-FILE *SCClassConfGenerateInvalidDummyClassConfigFD03(void);
+FILE *SCClassConfGenerateInValidDummyClassConfigFD02(void);
+FILE *SCClassConfGenerateInValidDummyClassConfigFD03(void);
 #endif
 
-#endif /* SURICATA_UTIL_CLASSIFICATION_CONFIG_H */
+#endif /* __UTIL_CLASSIFICATION_CONFIG_H__ */

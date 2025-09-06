@@ -25,7 +25,6 @@
 
 #include "suricata-common.h"
 #include "util-pages.h"
-#include "util-debug.h"
 
 #ifndef HAVE_PAGESUPPORTSRWX_AS_MACRO
 
@@ -43,8 +42,6 @@
 int PageSupportsRWX(void)
 {
     int retval = 1;
-    // suppress scan-build security.MmapWriteExec
-#ifndef __clang_analyzer__
     void *ptr;
     ptr = mmap(0, getpagesize(), PROT_READ|PROT_WRITE, MAP_ANON|MAP_SHARED, -1, 0);
     if (ptr != MAP_FAILED) {
@@ -54,7 +51,6 @@ int PageSupportsRWX(void)
         }
         munmap(ptr, getpagesize());
     }
-#endif
     return retval;
 }
 #endif /* HAVE_PAGESUPPORTSRWX_AS_MACRO */

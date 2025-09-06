@@ -34,9 +34,7 @@
 #include "detect-parse.h"
 #include "detect-engine.h"
 #include "detect-engine-state.h"
-#include "detect-engine-build.h"
 #include "detect-content.h"
-#include "detect-engine-uint.h"
 
 #include "detect-urilen.h"
 #include "util-debug.h"
@@ -44,6 +42,12 @@
 #include "flow-util.h"
 #include "stream-tcp.h"
 
+/**
+ * \brief Regex for parsing our urilen
+ */
+#define PARSE_REGEX  "^(?:\\s*)(<|>)?(?:\\s*)([0-9]{1,5})(?:\\s*)(?:(<>)(?:\\s*)([0-9]{1,5}))?\\s*(?:,\\s*(norm|raw))?\\s*$"
+
+static DetectParseRegex parse_regex;
 
 /*prototypes*/
 static int DetectUrilenSetup (DetectEngineCtx *, Signature *, const char *);
@@ -60,15 +64,16 @@ static int g_http_raw_uri_buffer_id = 0;
 
 void DetectUrilenRegister(void)
 {
-    sigmatch_table[DETECT_URILEN].name = "urilen";
-    sigmatch_table[DETECT_URILEN].desc = "match on the length of the HTTP uri";
-    sigmatch_table[DETECT_URILEN].url = "/rules/http-keywords.html#urilen";
-    sigmatch_table[DETECT_URILEN].Match = NULL;
-    sigmatch_table[DETECT_URILEN].Setup = DetectUrilenSetup;
-    sigmatch_table[DETECT_URILEN].Free = DetectUrilenFree;
+    sigmatch_table[DETECT_AL_URILEN].name = "urilen";
+    sigmatch_table[DETECT_AL_URILEN].desc = "match on the length of the HTTP uri";
+    sigmatch_table[DETECT_AL_URILEN].url = "/rules/http-keywords.html#urilen";
+    sigmatch_table[DETECT_AL_URILEN].Match = NULL;
+    sigmatch_table[DETECT_AL_URILEN].Setup = DetectUrilenSetup;
+    sigmatch_table[DETECT_AL_URILEN].Free = DetectUrilenFree;
 #ifdef UNITTESTS
-    sigmatch_table[DETECT_URILEN].RegisterTests = DetectUrilenRegisterTests;
+    sigmatch_table[DETECT_AL_URILEN].RegisterTests = DetectUrilenRegisterTests;
 #endif
+    DetectSetupParseRegexes(PARSE_REGEX, &parse_regex);
 
     g_http_uri_buffer_id = DetectBufferTypeRegister("http_uri");
     g_http_raw_uri_buffer_id = DetectBufferTypeRegister("http_raw_uri");
@@ -85,7 +90,146 @@ void DetectUrilenRegister(void)
 
 static DetectUrilenData *DetectUrilenParse (const char *urilenstr)
 {
-    return SCDetectUrilenParse(urilenstr);
+    DetectUrilenData *urilend = NULL;
+    char *arg1 = NULL;
+    char *arg2 = NULL;
+    char *arg3 = NULL;
+    char *arg4 = NULL;
+    char *arg5 = NULL;
+    int ret = 0, res = 0;
+    int ov[MAX_SUBSTRINGS];
+
+    ret = DetectParsePcreExec(&parse_regex, urilenstr, 0, 0, ov, MAX_SUBSTRINGS);
+    if (ret < 3 || ret > 6) {
+        SCLogError(SC_ERR_PCRE_PARSE, "urilen option pcre parse error: \"%s\"", urilenstr);
+        goto error;
+    }
+    const char *str_ptr;
+
+    SCLogDebug("ret %d", ret);
+
+    res = pcre_get_substring((char *)urilenstr, ov, MAX_SUBSTRINGS, 1, &str_ptr);
+    if (res < 0) {
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+        goto error;
+    }
+    arg1 = (char *) str_ptr;
+    SCLogDebug("Arg1 \"%s\"", arg1);
+
+    res = pcre_get_substring((char *)urilenstr, ov, MAX_SUBSTRINGS, 2, &str_ptr);
+    if (res < 0) {
+        SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+        goto error;
+    }
+    arg2 = (char *) str_ptr;
+    SCLogDebug("Arg2 \"%s\"", arg2);
+
+    if (ret > 3) {
+        res = pcre_get_substring((char *)urilenstr, ov, MAX_SUBSTRINGS, 3, &str_ptr);
+        if (res < 0) {
+            SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+            goto error;
+        }
+        arg3 = (char *) str_ptr;
+        SCLogDebug("Arg3 \"%s\"", arg3);
+
+        if (ret > 4) {
+            res = pcre_get_substring((char *)urilenstr, ov, MAX_SUBSTRINGS, 4, &str_ptr);
+            if (res < 0) {
+                SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                goto error;
+            }
+            arg4 = (char *) str_ptr;
+            SCLogDebug("Arg4 \"%s\"", arg4);
+        }
+        if (ret > 5) {
+            res = pcre_get_substring((char *)urilenstr, ov, MAX_SUBSTRINGS, 5, &str_ptr);
+            if (res < 0) {
+                SCLogError(SC_ERR_PCRE_GET_SUBSTRING, "pcre_get_substring failed");
+                goto error;
+            }
+            arg5 = (char *) str_ptr;
+            SCLogDebug("Arg5 \"%s\"", arg5);
+        }
+    }
+
+    urilend = SCMalloc(sizeof (DetectUrilenData));
+    if (unlikely(urilend == NULL))
+        goto error;
+    memset(urilend, 0, sizeof(DetectUrilenData));
+
+    if (arg1[0] == '<')
+        urilend->mode = DETECT_URILEN_LT;
+    else if (arg1[0] == '>')
+        urilend->mode = DETECT_URILEN_GT;
+    else
+        urilend->mode = DETECT_URILEN_EQ;
+
+    if (arg3 != NULL && strcmp("<>", arg3) == 0) {
+        if (strlen(arg1) != 0) {
+            SCLogError(SC_ERR_INVALID_ARGUMENT,"Range specified but mode also set");
+            goto error;
+        }
+        urilend->mode = DETECT_URILEN_RA;
+    }
+
+    /** set the first urilen value */
+    if (StringParseUint16(&urilend->urilen1,10,strlen(arg2),arg2) <= 0){
+        SCLogError(SC_ERR_INVALID_ARGUMENT,"Invalid size :\"%s\"",arg2);
+        goto error;
+    }
+
+    /** set the second urilen value if specified */
+    if (arg4 != NULL && strlen(arg4) > 0) {
+        if (urilend->mode != DETECT_URILEN_RA) {
+            SCLogError(SC_ERR_INVALID_ARGUMENT,"Multiple urilen values specified"
+                                           " but mode is not range");
+            goto error;
+        }
+
+        if(StringParseUint16(&urilend->urilen2,10,strlen(arg4),arg4) <= 0)
+        {
+            SCLogError(SC_ERR_INVALID_ARGUMENT,"Invalid size :\"%s\"",arg4);
+            goto error;
+        }
+
+        if (urilend->urilen2 <= urilend->urilen1){
+            SCLogError(SC_ERR_INVALID_ARGUMENT,"urilen2:%"PRIu16" <= urilen:"
+                        "%"PRIu16"",urilend->urilen2,urilend->urilen1);
+            goto error;
+        }
+    }
+
+    if (arg5 != NULL) {
+        if (strcasecmp("raw", arg5) == 0) {
+            urilend->raw_buffer = 1;
+        }
+    }
+
+    pcre_free_substring(arg1);
+    pcre_free_substring(arg2);
+    if (arg3 != NULL)
+        pcre_free_substring(arg3);
+    if (arg4 != NULL)
+        pcre_free_substring(arg4);
+    if (arg5 != NULL)
+        pcre_free_substring(arg5);
+    return urilend;
+
+error:
+    if (urilend)
+        SCFree(urilend);
+    if (arg1 != NULL)
+        pcre_free_substring(arg1);
+    if (arg2 != NULL)
+        pcre_free_substring(arg2);
+    if (arg3 != NULL)
+        pcre_free_substring(arg3);
+    if (arg4 != NULL)
+        pcre_free_substring(arg4);
+    if (arg5 != NULL)
+        pcre_free_substring(arg5);
+    return NULL;
 }
 
 /**
@@ -102,25 +246,24 @@ static int DetectUrilenSetup (DetectEngineCtx *de_ctx, Signature *s, const char 
 {
     SCEnter();
     DetectUrilenData *urilend = NULL;
+    SigMatch *sm = NULL;
 
-    if (SCDetectSignatureSetAppProto(s, ALPROTO_HTTP) != 0)
+    if (DetectSignatureSetAppProto(s, ALPROTO_HTTP) != 0)
         return -1;
 
     urilend = DetectUrilenParse(urilenstr);
     if (urilend == NULL)
         goto error;
+    sm = SigMatchAlloc();
+    if (sm == NULL)
+        goto error;
+    sm->type = DETECT_AL_URILEN;
+    sm->ctx = (void *)urilend;
 
-    if (urilend->raw_buffer) {
-        if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_URILEN, (SigMatchCtx *)urilend,
-                    g_http_raw_uri_buffer_id) == NULL) {
-            goto error;
-        }
-    } else {
-        if (SCSigMatchAppendSMToList(de_ctx, s, DETECT_URILEN, (SigMatchCtx *)urilend,
-                    g_http_uri_buffer_id) == NULL) {
-            goto error;
-        }
-    }
+    if (urilend->raw_buffer)
+        SigMatchAppendSMToList(s, sm, g_http_raw_uri_buffer_id);
+    else
+        SigMatchAppendSMToList(s, sm, g_http_uri_buffer_id);
 
     SCReturnInt(0);
 
@@ -140,7 +283,7 @@ static void DetectUrilenFree(DetectEngineCtx *de_ctx, void *ptr)
         return;
 
     DetectUrilenData *urilend = (DetectUrilenData *)ptr;
-    SCDetectUrilenFree(urilend);
+    SCFree(urilend);
 }
 
 /** \brief set prefilter dsize pair
@@ -148,94 +291,74 @@ static void DetectUrilenFree(DetectEngineCtx *de_ctx, void *ptr)
  */
 void DetectUrilenApplyToContent(Signature *s, int list)
 {
-    for (uint32_t x = 0; x < s->init_data->buffer_index; x++) {
-        if (s->init_data->buffers[x].id != (uint32_t)list)
+    uint16_t high = 65535;
+    bool found = false;
+
+    SigMatch *sm = s->init_data->smlists[list];
+    for ( ; sm != NULL; sm = sm->next) {
+        if (sm->type != DETECT_AL_URILEN)
             continue;
 
-        uint16_t high = UINT16_MAX;
-        bool found = false;
+        DetectUrilenData *dd = (DetectUrilenData *)sm->ctx;
 
-        for (SigMatch *sm = s->init_data->buffers[x].head; sm != NULL; sm = sm->next) {
-            if (sm->type != DETECT_URILEN)
-                continue;
+        switch (dd->mode) {
+            case DETECT_URILEN_LT:
+                high = dd->urilen1 + 1;
+                break;
+            case DETECT_URILEN_EQ:
+                high = dd->urilen1;
+                break;
+            case DETECT_URILEN_RA:
+                high = dd->urilen2 + 1;
+                break;
+            case DETECT_URILEN_GT:
+                high = 65535;
+                break;
+        }
+        found = true;
+    }
 
-            DetectUrilenData *dd = (DetectUrilenData *)sm->ctx;
+    // skip 65535 to avoid mismatch on uri > 64k
+    if (!found || high == 65535)
+        return;
 
-            switch (dd->du16.mode) {
-                case DETECT_UINT_LT:
-                    if (dd->du16.arg1 < UINT16_MAX) {
-                        high = dd->du16.arg1 + 1;
-                    }
-                    break;
-                case DETECT_UINT_LTE:
-                    // fallthrough
-                case DETECT_UINT_EQ:
-                    high = dd->du16.arg1;
-                    break;
-                case DETECT_UINT_RA:
-                    if (dd->du16.arg2 < UINT16_MAX) {
-                        high = dd->du16.arg2 + 1;
-                    }
-                    break;
-                case DETECT_UINT_NE:
-                    // fallthrough
-                case DETECT_UINT_GTE:
-                    // fallthrough
-                case DETECT_UINT_GT:
-                    high = UINT16_MAX;
-                    break;
-            }
-            found = true;
+    SCLogDebug("high %u", high);
+
+    sm = s->init_data->smlists[list];
+    for ( ; sm != NULL;  sm = sm->next) {
+        if (sm->type != DETECT_CONTENT) {
+            continue;
+        }
+        DetectContentData *cd = (DetectContentData *)sm->ctx;
+        if (cd == NULL) {
+            continue;
         }
 
-        // skip 65535 to avoid mismatch on uri > 64k
-        if (!found || high == UINT16_MAX)
-            return;
-
-        SCLogDebug("high %u", high);
-
-        for (SigMatch *sm = s->init_data->buffers[x].head; sm != NULL; sm = sm->next) {
-            if (sm->type != DETECT_CONTENT) {
-                continue;
-            }
-            DetectContentData *cd = (DetectContentData *)sm->ctx;
-            if (cd == NULL) {
-                continue;
-            }
-
-            if (cd->depth == 0 || cd->depth > high) {
-                cd->depth = high;
-                cd->flags |= DETECT_CONTENT_DEPTH;
-                SCLogDebug("updated %u, content %u to have depth %u "
-                           "because of urilen.",
-                        s->id, cd->id, cd->depth);
-            }
+        if (cd->depth == 0 || cd->depth > high) {
+            cd->depth = (uint16_t)high;
+            SCLogDebug("updated %u, content %u to have depth %u "
+                    "because of urilen.", s->id, cd->id, cd->depth);
         }
     }
 }
 
-bool DetectUrilenValidateContent(
-        const Signature *s, const char **sigerror, const DetectBufferType *dbt)
+bool DetectUrilenValidateContent(const Signature *s, int list, const char **sigerror)
 {
-    for (uint32_t x = 0; x < s->init_data->buffer_index; x++) {
-        if (s->init_data->buffers[x].id != (uint32_t)dbt->id)
+    const SigMatch *sm = s->init_data->smlists[list];
+    for ( ; sm != NULL;  sm = sm->next) {
+        if (sm->type != DETECT_CONTENT) {
             continue;
-        for (const SigMatch *sm = s->init_data->buffers[x].head; sm != NULL; sm = sm->next) {
-            if (sm->type != DETECT_CONTENT) {
-                continue;
-            }
-            DetectContentData *cd = (DetectContentData *)sm->ctx;
-            if (cd == NULL) {
-                continue;
-            }
+        }
+        DetectContentData *cd = (DetectContentData *)sm->ctx;
+        if (cd == NULL) {
+            continue;
+        }
 
-            if (cd->depth && cd->depth < cd->content_len) {
-                *sigerror = "depth or urilen smaller than content len";
-                SCLogError("depth or urilen %u smaller "
-                           "than content len %u",
-                        cd->depth, cd->content_len);
-                return false;
-            }
+        if (cd->depth && cd->depth < cd->content_len) {
+            *sigerror = "depth or urilen smaller than content len";
+            SCLogError(SC_ERR_INVALID_SIGNATURE, "depth or urilen %u smaller "
+                    "than content len %u", cd->depth, cd->content_len);
+            return false;
         }
     }
     return true;
@@ -246,9 +369,9 @@ bool DetectUrilenValidateContent(
 #include "stream.h"
 #include "stream-tcp-private.h"
 #include "stream-tcp-reassemble.h"
+#include "detect-engine.h"
 #include "detect-engine-mpm.h"
 #include "app-layer-parser.h"
-#include "detect-engine-alert.h"
 
 /** \test   Test the Urilen keyword setup */
 static int DetectUrilenParseTest01(void)
@@ -258,8 +381,8 @@ static int DetectUrilenParseTest01(void)
 
     urilend = DetectUrilenParse("10");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 10 && urilend->du16.mode == DETECT_UINT_EQ &&
-                !urilend->raw_buffer)
+        if (urilend->urilen1 == 10 && urilend->mode == DETECT_URILEN_EQ &&
+            !urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -275,8 +398,8 @@ static int DetectUrilenParseTest02(void)
 
     urilend = DetectUrilenParse(" < 10  ");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 10 && urilend->du16.mode == DETECT_UINT_LT &&
-                !urilend->raw_buffer)
+        if (urilend->urilen1 == 10 && urilend->mode == DETECT_URILEN_LT &&
+            !urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -292,8 +415,8 @@ static int DetectUrilenParseTest03(void)
 
     urilend = DetectUrilenParse(" > 10 ");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 10 && urilend->du16.mode == DETECT_UINT_GT &&
-                !urilend->raw_buffer)
+        if (urilend->urilen1 == 10 && urilend->mode == DETECT_URILEN_GT &&
+            !urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -309,8 +432,9 @@ static int DetectUrilenParseTest04(void)
 
     urilend = DetectUrilenParse(" 5 <> 10 ");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 5 && urilend->du16.arg2 == 10 &&
-                urilend->du16.mode == DETECT_UINT_RA && !urilend->raw_buffer)
+        if (urilend->urilen1 == 5 && urilend->urilen2 == 10 &&
+            urilend->mode == DETECT_URILEN_RA &&
+            !urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -326,8 +450,9 @@ static int DetectUrilenParseTest05(void)
 
     urilend = DetectUrilenParse("5<>10,norm");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 5 && urilend->du16.arg2 == 10 &&
-                urilend->du16.mode == DETECT_UINT_RA && !urilend->raw_buffer)
+        if (urilend->urilen1 == 5 && urilend->urilen2 == 10 &&
+            urilend->mode == DETECT_URILEN_RA &&
+            !urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -343,8 +468,9 @@ static int DetectUrilenParseTest06(void)
 
     urilend = DetectUrilenParse("5<>10,raw");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 5 && urilend->du16.arg2 == 10 &&
-                urilend->du16.mode == DETECT_UINT_RA && urilend->raw_buffer)
+        if (urilend->urilen1 == 5 && urilend->urilen2 == 10 &&
+            urilend->mode == DETECT_URILEN_RA &&
+            urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -360,8 +486,8 @@ static int DetectUrilenParseTest07(void)
 
     urilend = DetectUrilenParse(">10, norm ");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 10 && urilend->du16.mode == DETECT_UINT_GT &&
-                !urilend->raw_buffer)
+        if (urilend->urilen1 == 10 && urilend->mode == DETECT_URILEN_GT &&
+            !urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -377,8 +503,8 @@ static int DetectUrilenParseTest08(void)
 
     urilend = DetectUrilenParse("<10, norm ");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 10 && urilend->du16.mode == DETECT_UINT_LT &&
-                !urilend->raw_buffer)
+        if (urilend->urilen1 == 10 && urilend->mode == DETECT_URILEN_LT &&
+            !urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -394,7 +520,8 @@ static int DetectUrilenParseTest09(void)
 
     urilend = DetectUrilenParse(">10, raw ");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 10 && urilend->du16.mode == DETECT_UINT_GT && urilend->raw_buffer)
+        if (urilend->urilen1 == 10 && urilend->mode == DETECT_URILEN_GT &&
+            urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -410,7 +537,8 @@ static int DetectUrilenParseTest10(void)
 
     urilend = DetectUrilenParse("<10, raw ");
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 10 && urilend->du16.mode == DETECT_UINT_LT && urilend->raw_buffer)
+        if (urilend->urilen1 == 10 && urilend->mode == DETECT_URILEN_LT &&
+            urilend->raw_buffer)
             ret = 1;
 
         DetectUrilenFree(NULL, urilend);
@@ -484,14 +612,13 @@ static int DetectUrilenSetpTest01(void)
         goto cleanup;
 
     if (urilend != NULL) {
-        if (urilend->du16.arg1 == 1 && urilend->du16.arg2 == 2 &&
-                urilend->du16.mode == DETECT_UINT_RA)
+        if (urilend->urilen1 == 1 && urilend->urilen2 == 2 &&
+                urilend->mode == DETECT_URILEN_RA)
             res = 1;
     }
 
 cleanup:
-    if (urilend)
-        DetectUrilenFree(NULL, urilend);
+    if (urilend) SCFree(urilend);
     SigGroupCleanup(de_ctx);
     SigCleanSignatures(de_ctx);
     DetectEngineCtxFree(de_ctx);
@@ -499,7 +626,7 @@ end:
     return res;
 }
 
-/** \test Check a signature with given urilen */
+/** \test Check a signature with gievn urilen */
 static int DetectUrilenSigTest01(void)
 {
     int result = 0;
@@ -530,9 +657,9 @@ static int DetectUrilenSigTest01(void)
     p->flowflags |= FLOW_PKT_TOSERVER;
     p->flowflags |= FLOW_PKT_ESTABLISHED;
     p->flags |= PKT_HAS_FLOW|PKT_STREAM_EST;
-    f.alproto = ALPROTO_HTTP1;
+    f.alproto = ALPROTO_HTTP;
 
-    StreamTcpInitConfig(true);
+    StreamTcpInitConfig(TRUE);
 
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
     if (de_ctx == NULL) {
@@ -560,12 +687,15 @@ static int DetectUrilenSigTest01(void)
     SigGroupBuild(de_ctx);
     DetectEngineThreadCtxInit(&th_v, (void *)de_ctx, (void *)&det_ctx);
 
-    int r = AppLayerParserParse(
-            NULL, alp_tctx, &f, ALPROTO_HTTP1, STREAM_TOSERVER, httpbuf1, httplen1);
+    FLOWLOCK_WRLOCK(&f);
+    int r = AppLayerParserParse(NULL, alp_tctx, &f, ALPROTO_HTTP,
+                                STREAM_TOSERVER, httpbuf1, httplen1);
     if (r != 0) {
         SCLogDebug("toserver chunk 1 returned %" PRId32 ", expected 0: ", r);
+        FLOWLOCK_UNLOCK(&f);
         goto end;
     }
+    FLOWLOCK_UNLOCK(&f);
 
     HtpState *htp_state = f.alstate;
     if (htp_state == NULL) {
@@ -593,7 +723,7 @@ end:
     if (de_ctx != NULL) SigCleanSignatures(de_ctx);
     if (de_ctx != NULL) DetectEngineCtxFree(de_ctx);
 
-    StreamTcpFreeConfig(true);
+    StreamTcpFreeConfig(TRUE);
     FLOW_DESTROY(&f);
     UTHFreePackets(&p, 1);
     return result;

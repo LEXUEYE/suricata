@@ -21,14 +21,16 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_DATASETS_REPUTATION_H
-#define SURICATA_DATASETS_REPUTATION_H
+#ifndef __DATASETS_REPUTATION_H__
+#define __DATASETS_REPUTATION_H__
 
-#include "rust-bindings.h"
+typedef struct DataRepType {
+    uint16_t value;
+} DataRepType;
 
 typedef struct DataRepResultType {
     bool found;
     DataRepType rep;
 } DataRepResultType;
 
-#endif /* SURICATA_DATASETS_REPUTATION_H */
+#endif /* __DATASETS_REPUTATION_H__ */

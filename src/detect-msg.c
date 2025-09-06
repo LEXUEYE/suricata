@@ -50,7 +50,7 @@ void DetectMsgRegister (void)
 #ifdef UNITTESTS
     sigmatch_table[DETECT_MSG].RegisterTests = DetectMsgRegisterTests;
 #endif
-    sigmatch_table[DETECT_MSG].flags = (SIGMATCH_QUOTES_MANDATORY | SIGMATCH_SUPPORT_FIREWALL);
+    sigmatch_table[DETECT_MSG].flags = SIGMATCH_QUOTES_MANDATORY;
 }
 
 static int DetectMsgSetup (DetectEngineCtx *de_ctx, Signature *s, const char *msgstr)
@@ -65,7 +65,7 @@ static int DetectMsgSetup (DetectEngineCtx *de_ctx, Signature *s, const char *ms
     char converted = 0;
 
     {
-        size_t i, x;
+        uint16_t i, x;
         uint8_t escape = 0;
 
         /* it doesn't matter if we need to escape or not we remove the extra "\" to mimic snort */
@@ -108,7 +108,7 @@ static int DetectMsgSetup (DetectEngineCtx *de_ctx, Signature *s, const char *ms
     }
 
     if (s->msg != NULL) {
-        SCLogError("duplicated 'msg' keyword detected");
+        SCLogError(SC_ERR_INVALID_SIGNATURE, "duplicated 'msg' keyword detected");
         goto error;
     }
     s->msg = SCStrdup(str);
@@ -125,64 +125,89 @@ error:
 #ifdef UNITTESTS
 static int DetectMsgParseTest01(void)
 {
+    int result = 0;
+    Signature *sig = NULL;
     const char *teststringparsed = "flow stateless to_server";
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    if (de_ctx == NULL)
+        goto end;
 
     FILE *fd = SCClassConfGenerateValidDummyClassConfigFD01();
-    SCClassConfLoadClassificationConfigFile(de_ctx, fd);
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
 
-    Signature *sig = DetectEngineAppendSig(de_ctx,
-            "alert tcp any any -> any any (msg:\"flow stateless to_server\"; "
-            "flow:stateless,to_server; content:\"flowstatelesscheck\"; "
-            "classtype:bad-unknown; sid: 40000002; rev: 1;)");
-    FAIL_IF_NULL(sig);
+    sig = SigInit(de_ctx, "alert tcp any any -> any any (msg:\"flow stateless to_server\"; flow:stateless,to_server; content:\"flowstatelesscheck\"; classtype:bad-unknown; sid: 40000002; rev: 1;)");
+    if(sig == NULL)
+        goto end;
 
-    FAIL_IF(strcmp(sig->msg, teststringparsed) != 0);
+    if (strcmp(sig->msg, teststringparsed) != 0) {
+        printf("got \"%s\", expected: \"%s\": ", sig->msg, teststringparsed);
+        goto end;
+    }
 
-    DetectEngineCtxFree(de_ctx);
-
-    PASS;
+    result = 1;
+end:
+    if (sig != NULL)
+        SigFree(de_ctx, sig);
+    if (de_ctx != NULL)
+        DetectEngineCtxFree(de_ctx);
+    return result;
 }
 
 static int DetectMsgParseTest02(void)
 {
+    int result = 0;
+    Signature *sig = NULL;
     const char *teststringparsed = "msg escape tests wxy'\"\\;:";
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    if (de_ctx == NULL)
+        goto end;
 
-    Signature *sig = DetectEngineAppendSig(de_ctx,
-            "alert tcp any any -> any any (msg:\"msg escape tests \\w\\x\\y\\'\\\"\\\\;\\:\"; "
-            "flow:to_server,established; content:\"blah\"; uricontent:\"/blah/\"; sid: 100;)");
-    FAIL_IF_NULL(sig);
+    sig = SigInit(de_ctx, "alert tcp any any -> any any (msg:\"msg escape tests \\w\\x\\y\\'\\\"\\\\;\\:\"; flow:to_server,established; content:\"blah\"; uricontent:\"/blah/\"; sid: 100;)");
+    if(sig == NULL)
+        goto end;
 
-    FAIL_IF(strcmp(sig->msg, teststringparsed) != 0);
+    if (strcmp(sig->msg, teststringparsed) != 0) {
+        printf("got \"%s\", expected: \"%s\": ",sig->msg, teststringparsed);
+        goto end;
+    }
 
-    DetectEngineCtxFree(de_ctx);
-
-    PASS;
+    result = 1;
+end:
+    if (sig != NULL)
+        SigFree(de_ctx, sig);
+    if (de_ctx != NULL)
+        DetectEngineCtxFree(de_ctx);
+    return result;
 }
 
 static int DetectMsgParseTest03(void)
 {
+    int result = 0;
+    Signature *sig = NULL;
     const char *teststringparsed = "flow stateless to_server";
     DetectEngineCtx *de_ctx = DetectEngineCtxInit();
-    FAIL_IF_NULL(de_ctx);
+    if (de_ctx == NULL)
+        goto end;
 
     FILE *fd = SCClassConfGenerateValidDummyClassConfigFD01();
-    SCClassConfLoadClassificationConfigFile(de_ctx, fd);
+    SCClassConfLoadClassficationConfigFile(de_ctx, fd);
 
-    Signature *sig = DetectEngineAppendSig(de_ctx,
-            "alert tcp any any -> any any (msg: \"flow stateless to_server\"; "
-            "flow:stateless,to_server; content:\"flowstatelesscheck\"; "
-            "classtype:bad-unknown; sid: 40000002; rev: 1;)");
-    FAIL_IF_NULL(sig);
+    sig = SigInit(de_ctx, "alert tcp any any -> any any (msg: \"flow stateless to_server\"; flow:stateless,to_server; content:\"flowstatelesscheck\"; classtype:bad-unknown; sid: 40000002; rev: 1;)");
+    if(sig == NULL)
+        goto end;
 
-    FAIL_IF(strcmp(sig->msg, teststringparsed) != 0);
+    if (strcmp(sig->msg, teststringparsed) != 0) {
+        printf("got \"%s\", expected: \"%s\": ", sig->msg, teststringparsed);
+        goto end;
+    }
 
-    DetectEngineCtxFree(de_ctx);
-
-    PASS;
+    result = 1;
+end:
+    if (sig != NULL)
+        SigFree(de_ctx, sig);
+    if (de_ctx != NULL)
+        DetectEngineCtxFree(de_ctx);
+    return result;
 }
 
 /**

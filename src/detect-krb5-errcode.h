@@ -21,8 +21,8 @@
  * \author Pierre Chifflier <chifflier@wzdftpd.net>
  */
 
-#ifndef SURICATA_DETECT_KRB5_ERRCODE_H
-#define SURICATA_DETECT_KRB5_ERRCODE_H
+#ifndef __DETECT_KRB5_ERRCODE_H__
+#define __DETECT_KRB5_ERRCODE_H__
 
 typedef struct DetectKrb5ErrCodeData_ {
     int32_t err_code;
@@ -30,4 +30,4 @@ typedef struct DetectKrb5ErrCodeData_ {
 
 void DetectKrb5ErrCodeRegister(void);
 
-#endif /* SURICATA_DETECT_KRB5_ERRCODE_H */
+#endif /* __DETECT_KRB5_ERRCODE_H__ */

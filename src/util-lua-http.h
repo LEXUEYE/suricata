@@ -21,11 +21,13 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_UTIL_LUA_HTTP_H
-#define SURICATA_UTIL_LUA_HTTP_H
+#ifndef __UTIL_LUA_HTTP_H__
+#define __UTIL_LUA_HTTP_H__
 
-#include "lua.h"
+#ifdef HAVE_LUA
 
-int SCLuaLoadHttpLib(lua_State *);
+int LuaRegisterHttpFunctions(lua_State *luastate);
 
-#endif /* SURICATA_UTIL_LUA_HTTP_H */
+#endif /* HAVE_LUA */
+
+#endif /* __UTIL_LUA_HTTP_H__ */

@@ -21,11 +21,13 @@
  * \author Eric Leblond <eric@regit.org>
  */
 
-#ifndef SURICATA_UTIL_LUA_DNS_H
-#define SURICATA_UTIL_LUA_DNS_H
+#ifndef __UTIL_LUA_DNS_H__
+#define __UTIL_LUA_DNS_H__
 
-#include "lua.h"
+#ifdef HAVE_LUA
 
-int SCLuaLoadDnsLib(lua_State *L);
+int LuaRegisterDnsFunctions(lua_State *luastate);
 
-#endif /* SURICATA_UTIL_LUA_DNS */
+#endif /* HAVE_LUA */
+
+#endif /* __UTIL_LUA_HTTP_H__ */

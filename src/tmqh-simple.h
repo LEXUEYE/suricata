@@ -21,9 +21,9 @@
  * \author Victor Julien <victor@inliniac.net>
  */
 
-#ifndef SURICATA_TMQH_SIMPLE_H
-#define SURICATA_TMQH_SIMPLE_H
+#ifndef __TMQH_SIMPLE_H__
+#define __TMQH_SIMPLE_H__
 
 void TmqhSimpleRegister (void);
 
-#endif /* SURICATA_TMQH_SIMPLE_H */
+#endif /* __TMQH_SIMPLE_H__ */
